@@ -1,0 +1,20 @@
+battery:            # Teranty 5200 mAh, labelled 60C / max 80C
+  mass_g: {value: 277, status: measured}
+  cells: {value: 3, status: to_verify}          # four balance wires seen
+  length_mm: {value: 135.56, status: measured}
+  width_mm:  {value: 43.5, status: measured}
+  thickness_mm: {value: 22.06, status: measured}
+  case: {value: null, status: requested}         # soft / hard
+  main_connector: {value: null, status: requested}
+  lead_exit: {value: null, status: requested}    # which face, offset from edge
+ubec_8a:            # Nuofany ASIN B0CN3429PF, two units
+  body_mm: {value: [51, 36, 8], status: listing_claim}   # verify on the unit
+  mass_g: {value: 32, status: listing_claim}
+servo_sts3215:
+  label_suffix: {value: null, status: requested} # e.g. ST-3215-C001
+  horn_type_supplied: {value: null, status: requested}
+  horn_bolt_circle_mm: {value: null, status: requested}
+oak_d_lite:
+  revision: {value: null, status: requested}
+eye_led:
+  package: {value: null, status: not_selected}

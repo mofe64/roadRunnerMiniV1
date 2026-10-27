@@ -1,0 +1,11 @@
+.DS_Store
+cad/vendor/*
+!cad/vendor/measurements.yaml
+cad/biped_v02/scripts/
+__pycache__/
+*.pyc
+.venv/
+rl/runs/
+rl/checkpoints/
+wandb/
+cad/biped_v02/*.step
