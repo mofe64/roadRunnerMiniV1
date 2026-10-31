@@ -132,7 +132,10 @@ class Robot:
         """power -1..1 per wheel (+ = forward). 1.0 = PWM 1000 = full power, as on the bench test."""
         vals = {}
         for n, p in zip(WHEELS, power):
-            raw = sts.unsigned(int(round(np.clip(p, -1, 1) * 1000)) * self.sign[n], bit=10)
+            # ST3215-HS in PWM mode: + PWM turns the wheel so that its position count goes DOWN
+            # (bench 2026-10-30, wheel_bench_1.csv: PWM +500 -> -1.15 rad/s; air test 2026-10-31 confirmed).
+            # self.sign maps counts to "+ = rolling forward", so the PWM gets the opposite sign.
+            raw = sts.unsigned(-int(round(np.clip(p, -1, 1) * 1000)) * self.sign[n], bit=10)
             vals[self.id[n]] = [raw & 0xFF, (raw >> 8) & 0xFF]
         self.wheels.sync_write(sts.PWM_GOAL, vals)
 
