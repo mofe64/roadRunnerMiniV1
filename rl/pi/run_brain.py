@@ -44,8 +44,13 @@ if j is None:
     raise SystemExit("A servo did not answer.")
 start, goal = j[0], brain.stand_hips(ctl.command[2])
 input("Hold the robot. The legs will move to the stand pose in 2 s. Press Enter.")
-for k in range(int(2 * hz)):
-    robot.write_hips(start + (goal - start) * (k + 1) / (2 * hz)); time.sleep(dt)
+for k in range(int(2.5 * hz)):
+    want = start + (goal - start) * min(1.0, (k + 1) / (2 * hz))
+    robot.write_hips(want); time.sleep(dt)
+    jj = robot.read_joints()
+    if jj is None or (np.abs(np.asarray(jj[0]) - want) > np.radians(20)).any():
+        robot.stop(hips_off=True)
+        raise SystemExit("STOP: a hip did not follow the stand move (or did not answer). All limp. Tell Claude.")
 
 # 2. IMU zero (the robot must be still)
 input(("Wheels in the air, robot still. " if args.air else "Hold the robot upright on its wheels, STILL. ") + "Press Enter.")
@@ -65,6 +70,7 @@ old_tty = termios.tcgetattr(sys.stdin); tty.setcbreak(sys.stdin.fileno())
 speed, turn, height = 0.0, 0.0, float(brain.c["height_normal"])
 reason, volts, t0 = "q pressed", v0, time.perf_counter()
 ctl.reset(robot.read_joints()[0])
+hip_bad = 0
 next_t = prev = time.perf_counter()
 try:
     while True:
@@ -84,6 +90,12 @@ try:
                 robot.write_hips(brain.stand_hips(TUCK_HEIGHT))
                 robot.write_wheels(np.zeros(2))
                 time.sleep(dt)
+            break
+        # Hip watchdog: a hip more than 25 deg from its last target for 0.2 s = a servo fault -> stop.
+        far = np.abs(np.asarray(j[0]) - ctl.hip_target) > np.radians(25)
+        hip_bad = hip_bad + 1 if far.any() else 0
+        if hip_bad >= 10:
+            reason = "hip far from its target (" + ", ".join(f"{np.degrees(a):+.0f}" for a in j[0]) + " deg): servo fault"
             break
         target, power, action = ctl.step(down, gyro, *j)
         robot.write_hips(target)
