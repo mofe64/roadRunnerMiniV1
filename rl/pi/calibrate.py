@@ -71,20 +71,29 @@ if "head" in PARTS:
     cfg["sign"]["head_pitch"] = 1 if d > 0 else -1         # + pitch = nose down (simulator)
 
 if "wheels" in PARTS:
-    input("\nWHEELS: put the robot on the floor, hold it upright, and get ready to roll it FORWARD about 30 cm. Press Enter, then roll it.")
-    p0 = {n: count(wheels, n) for n in WHEELS}
-    total = {n: 0 for n in WHEELS}
     import time
-    t_end = time.time() + 4
-    print("Rolling... (4 s)")
-    while time.time() < t_end:
+    wheels.torque([ids[n] for n in WHEELS], False)          # free wheels: no brake while you roll it
+    while True:
+        input("\nWHEELS: put the robot on the floor and hold it upright. Press Enter, then roll it FORWARD (camera direction) about 30 cm.")
+        p0 = {n: count(wheels, n) for n in WHEELS}
+        total = {n: 0 for n in WHEELS}
+        t_end = time.time() + 6
+        print("Roll it now... (6 s)")
+        while time.time() < t_end:
+            for n in WHEELS:
+                c = count(wheels, n)
+                total[n] += (c - p0[n] + 2048) % 4096 - 2048; p0[n] = c
+            time.sleep(0.01)
         for n in WHEELS:
-            c = count(wheels, n)
-            total[n] += (c - p0[n] + 2048) % 4096 - 2048; p0[n] = c
-        time.sleep(0.01)
+            print(f"  {n}: turned {abs(total[n]) * RAD * 57.3:.0f} deg = {abs(total[n]) * RAD * 0.035 * 100:.0f} cm of floor")
+        if all(abs(total[n]) * RAD * 0.035 > 0.10 for n in WHEELS):
+            break
+        print("  Less than 10 cm on a wheel. Nothing saved for the wheels. Roll it again (or tell Claude if the wheels did turn).")
     for n in WHEELS:
         cfg["sign"][n] = 1 if total[n] > 0 else -1
-        print(f"  {n}: turned {abs(total[n]) * RAD * 57.3:.0f} deg = {abs(total[n]) * RAD * 0.035 * 100:.0f} cm of floor, direction {cfg['sign'][n]:+d}")
+        print(f"  {n}: direction {cfg['sign'][n]:+d}")
+
+
 def center(names):
     """Move the servo's middle count (2048) to the measured zero with the offset register.
     The servo reports present = raw - offset (sign bit 11). Wanted: raw_zero - new = 2048."""
