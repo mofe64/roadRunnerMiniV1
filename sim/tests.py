@@ -2,9 +2,9 @@ import math, os, sys, json
 import numpy as np
 import mujoco
 sys.path.insert(0, os.path.dirname(__file__))
-from build_model import leg_angles, knee_angle, WHEEL_R, HS_TORQUE
+from build_model_v03 import leg_angles, knee_angle, WHEEL_R, HS_TORQUE, HS_VEL
 
-m = mujoco.MjModel.from_xml_path(os.environ.get("MODEL_XML", os.path.join(os.path.dirname(__file__), "eggbot_v0.xml")))
+m = mujoco.MjModel.from_xml_path(os.environ.get("MODEL_XML", os.path.join(os.path.dirname(__file__), "roadrunner_mini.xml")))
 d = mujoco.MjData(m)
 DT = m.opt.timestep
 HIPS = ["hip_f_L", "hip_r_L", "hip_f_R", "hip_r_R"]
@@ -59,8 +59,16 @@ class Balancer:
         self.x_ref += v_ref * DT
         tau = self.kp * p + self.kd * prate + self.kv * (v - v_ref) + self.kx * (x - self.x_ref)
         tau = float(np.clip(tau, -HS_TORQUE, HS_TORQUE))
-        d.ctrl[act["wheel_L"]] = tau; d.ctrl[act["wheel_R"]] = tau
+        set_wheel_torque(tau)
         return p, tau
+
+
+def set_wheel_torque(tau):
+    """Ask for a wheel torque. The motor loses HS_TORQUE/HS_VEL Nm per rad/s of wheel speed,
+    so add that back (like a motor driver raising the voltage), up to the motor limit."""
+    for s in ("L", "R"):
+        w = d.qvel[m.jnt_dofadr[jnt[f"wheel_{s}"]]]
+        d.ctrl[act[f"wheel_{s}"]] = float(np.clip(tau + HS_TORQUE / HS_VEL * w, -HS_TORQUE, HS_TORQUE))
 
 
 def hip_torques():

@@ -1,0 +1,219 @@
+"""Road Runner Mini: the driving game. Same robot and realism as balance_env.py, plus commands.
+
+Every few seconds the robot gets a new command: a forward speed (m/s), a turn rate (rad/s) and a
+leg height (m, crouch or stand tall), like a joystick. It scores points for matching the command
+while staying upright.
+
+Train:        TASK=drive TOTAL_STEPS=15000000 .venv/bin/python train.py
+Watch:        TASK=drive .venv/bin/mjpython train.py --watch
+Report card:  TASK=drive .venv/bin/python drive_env.py --test
+"""
+import os
+import sys
+import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim"))
+from build_model_v03 import leg_angles      # hip angles for a given leg height (five-bar geometry)
+from balance_env import BalanceEnv, POLICY_HZ, EPISODE_SECONDS, HISTORY, WHEEL_R, MIRROR
+
+# Commands (the "joystick"). A balancing robot needs spare wheel speed to catch itself,
+# so the top command is well below the wheel top speed (about 0.36 m/s).
+SPEED_MAX = float(os.environ.get("SPEED_MAX", "0.15"))   # m/s at level 100 % (70 mm wheels: 0.2 is at the motor's limit, 2026-10-30)
+SPEED_MAX_EASY = 0.07     # m/s at level 0 %
+REVERSE_MAX = float(os.environ.get("REVERSE_MAX", "0.10"))   # m/s backwards at level 100 % (reverse at 0.15 fell in every run, 2026-10-30)
+TURN_MAX = 1.5            # rad/s (about 86 deg/s)
+NEW_COMMAND_EVERY = (2.0, 4.0)   # s: a new command after a random time in this range
+STOP_CHANCE = 0.2         # some commands are "stand still"
+HEIGHT_RANGE = (0.080, 0.135)   # m: hip-to-axle height commands (legs can do 65-140 mm; keep a margin)
+HEIGHT_NORMAL = 0.120
+LAG_MAX = 0.25            # m: the "behind schedule" signal is capped at 25 cm
+HEADING_LAG_MAX = 0.5     # rad: the "off my heading" signal is capped at about 30 deg
+# Both signals slowly forget old errors (half gone after about 1.4 s), so they cannot get stuck at the cap
+# ("integrator wind-up"): a test of drive_016 showed them pinned at the cap for whole games.
+LEAK = 0.99
+# Experiments: DRIVE_PARTS=speed trains speed commands only (no turns, no height changes)
+CARD_GAMES = int(os.environ.get("CARD_GAMES", "50"))   # games per report card line (6 was too few: one fall = 17 %)
+DRIVE_PARTS = os.environ.get("DRIVE_PARTS", "speed,turn,height").split(",")
+# Driving uses smaller start leans and shoves than the balance game (12 deg, 0.45 N s). Those are at the
+# robot's physical limit, so the brain kept all its spare wheel speed for catching them and drove at half speed.
+DRIVE_START_LEAN = np.radians(8)
+DRIVE_SHOVE_MAX = 0.30
+
+
+class DriveEnv(BalanceEnv):
+    def __init__(self, seed=None, shoves=True, realism=True):
+        super().__init__(seed, shoves, realism)
+        self.start_lean, self.shove_max = DRIVE_START_LEAN, DRIVE_SHOVE_MAX
+        self.n_frame = 3 + 3 + 4 + 4 + 2 + 3 + 2 + self.n_act   # the odometer is replaced by the 3 commands + 2 lags
+        self.n_obs = self.n_frame * HISTORY
+        self.command = np.array([0.0, 0.0, HEIGHT_NORMAL])
+        self.axles = [self.m.body("axle_L").id, self.m.body("axle_R").id]
+        # hip angles for each leg height, so a height command moves the "home" pose of the hips
+        hs = np.linspace(0.065, 0.140, 76)
+        self.pose_table = (hs, np.array([[f, r, f, r] for f, r in (leg_angles(h) for h in hs)]))
+        self.stand_normal = self.stand_hips.copy()
+
+    def new_command(self):
+        top = SPEED_MAX_EASY + (SPEED_MAX - SPEED_MAX_EASY) * self.difficulty
+        back = min(top, REVERSE_MAX)   # backwards is capped lower than forwards
+        # the height range also grows with the level: 115-125 mm at level 0, 80-135 mm at level 100 %
+        lo = HEIGHT_NORMAL - (HEIGHT_NORMAL - HEIGHT_RANGE[0]) * max(self.difficulty, 0.1)
+        hi = HEIGHT_NORMAL + (HEIGHT_RANGE[1] - HEIGHT_NORMAL) * max(self.difficulty, 0.1)
+        height = self.rng.uniform(lo, hi) if self.rng.random() < 0.7 else HEIGHT_NORMAL
+        if self.rng.random() < STOP_CHANCE:
+            self.command = np.array([0.0, 0.0, height])
+        else:
+            self.command = np.array([self.rng.uniform(-back, top), self.rng.uniform(-TURN_MAX, TURN_MAX), height])
+        if "turn" not in DRIVE_PARTS:
+            self.command[1] = 0.0
+        if "height" not in DRIVE_PARTS:
+            self.command[2] = HEIGHT_NORMAL
+        hs, poses = self.pose_table
+        self.stand_hips = np.array([np.interp(self.command[2], hs, poses[:, i]) for i in range(4)])
+        self.next_command = self.steps + int(self.rng.uniform(*NEW_COMMAND_EVERY) * POLICY_HZ)
+        self.lag = self.heading_lag = 0.0         # a new command starts a new schedule
+
+    def body_speed(self):
+        """True forward speed (m/s) and turn rate (rad/s) of the body, for the score only."""
+        R = self.d.xmat[self.torso].reshape(3, 3)
+        heading = np.array([R[0, 0], R[1, 0]])
+        heading /= np.linalg.norm(heading) + 1e-9
+        forward = float(heading @ self.d.qvel[0:2])
+        turn = float((R @ self.d.qvel[3:6])[2])          # free joint angular velocity is in the body frame
+        return forward, turn
+
+    def leg_lengths(self):
+        """Left and right leg length: axle height in the body's own frame (m)."""
+        R = self.d.xmat[self.torso].reshape(3, 3)
+        return [(R.T @ (self.d.xpos[a] - self.d.xpos[self.torso]))[2] for a in self.axles]
+
+    def height(self):
+        """True hip-to-axle height (m), for the score only."""
+        return float(self.d.xpos[self.torso][2] - np.mean(self.d.xpos[self.axles, 2])) - self.height_offset
+
+    def observe(self):
+        d = self.d
+        imu = np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]])
+        self.imu_history = np.vstack([imu, self.imu_history[:-1]])
+        imu = self.imu_history[self.imu_delay]
+        gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)
+        gyro = imu[3:] + self.noise("gyro", 3)
+        hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)
+        hip_vel = d.qvel[self.hip_v] + self.noise("hip_vel", 4)
+        wheel_vel = d.qvel[self.wheel_v] + self.noise("wheel_vel", 2)
+        # "Behind schedule": how far the robot is behind (or ahead of) where the speed command would put it,
+        # from the wheel speeds the servos report. Without it the brain only sees the speed NOW, so a robot
+        # with more friction or a weaker motor than average settles at a lower speed (like a P controller
+        # with no I). With it, the brain can see the error add up and push harder (like the I in PI).
+        # The same idea for turning: how far the heading is off from where the turn command would put it,
+        # from the IMU's turn rate (gyro z). It fixes a slow drift to one side.
+        if self.steps == 0:
+            self.lag = self.heading_lag = 0.0
+        else:
+            self.lag = float(np.clip(LEAK * self.lag + (self.command[0] - WHEEL_R * np.mean(wheel_vel)) / POLICY_HZ, -LAG_MAX, LAG_MAX))
+            self.heading_lag = float(np.clip(LEAK * self.heading_lag + (self.command[1] - gyro[2]) / POLICY_HZ,
+                                             -HEADING_LAG_MAX, HEADING_LAG_MAX))
+        cmd = (self.command - [0, 0, HEIGHT_NORMAL]) / np.array([SPEED_MAX, TURN_MAX, 0.05])   # the joystick, about -1..1
+        frame = np.concatenate([gravity, gyro, hip_pos, hip_vel * 0.1, wheel_vel * 0.1, cmd, [self.lag / LAG_MAX, self.heading_lag / HEADING_LAG_MAX], self.last_action])
+        if HISTORY == 1:
+            return frame.astype(np.float32)
+        if self.steps == 0:
+            self.frames = np.tile(frame, (HISTORY, 1))
+        else:
+            self.frames = np.vstack([frame, self.frames[:-1]])
+        return self.frames.ravel().astype(np.float32)
+
+    def score(self, action):
+        g = self.true_gravity()
+        tilt = np.arccos(np.clip(-g[2], -1, 1))
+        forward, turn = self.body_speed()
+        alive = 1.0
+        # points for matching the speed and the turn: a bell curve (big points when close) plus a straight
+        # line (a steady push towards the command even when far away, so "half speed" is not good enough). Kept small, so a game is always worth more alive than fallen
+        # speed: bigger points and a steeper straight-line part than turn, because a test showed the brain
+        # drove at half speed with the wheels far from their limit (it was not a motor limit, it was the score)
+        go = 2.0 * np.exp(-(forward - self.command[0]) ** 2 / 0.01) - 3.0 * abs(forward - self.command[0])
+        steer = 1.0 * np.exp(-(turn - self.command[1]) ** 2 / 0.03) - 0.2 * abs(turn - self.command[1])
+        tall = 0.5 * np.exp(-(self.height() - self.command[2]) ** 2 / 0.0001)   # points for the right height (+/-1 cm)
+        upright = -2.0 * tilt ** 2
+        wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
+        smooth = -0.05 * np.sum((action - self.last_action) ** 2)
+        # keep both legs the same length (Mofe saw it stand with one leg higher): 1 cm difference costs 0.3
+        # (measured in the body's own frame: on flat ground both wheels touch, so uneven legs show as a body roll)
+        legs = self.leg_lengths()
+        level = -0.3 * ((legs[0] - legs[1]) / 0.01) ** 2 if not MIRROR else 0.0   # mirrored legs need no penalty
+        return alive + go + steer + tall + upright + wobble + smooth + level, tilt
+
+    def reset(self, pitch=None):
+        self.steps = 0
+        self.stand_hips = self.stand_normal       # every game starts standing at 120 mm (the keyframe)
+        super().reset(pitch)
+        self.height_offset = float(self.d.xpos[self.torso][2] - np.mean(self.d.xpos[self.axles, 2])) - HEIGHT_NORMAL
+        self.new_command()
+        return self.observe()
+
+    def step(self, action):
+        if self.steps >= self.next_command:
+            self.new_command()
+        return super().step(action)
+
+
+# Report card lines: (speed m/s, turn rad/s, height m, seconds). The 60 s lines test "stays up all the time";
+# the last lines are the hard corners (several commands at their limits together).
+CARD = [(0.0, 0.0, 0.12, 60), (0.1, 0.0, 0.12, 10), (0.15, 0.0, 0.12, 10), (-0.10, 0.0, 0.12, 10),
+        (0.0, 1.0, 0.12, 10), (0.1, 0.8, 0.12, 10), (0.0, 0.0, 0.08, 60), (0.0, 0.0, 0.135, 60), (0.1, 0.0, 0.09, 10),
+        (0.15, 1.0, 0.12, 10), (-0.10, 1.0, 0.12, 10), (0.15, 0.0, 0.08, 10), (0.0, 1.5, 0.135, 10)]
+
+
+def card_line(job):
+    """Play CARD_GAMES games of one report card line; return the printed line."""
+    path, (v, w, h, seconds), seed = job
+    from stable_baselines3 import PPO
+    model = PPO.load(path, device="cpu")
+    env = DriveEnv(seed=seed, shoves=False)
+    env.max_steps = seconds * POLICY_HZ
+    hs, poses = env.pose_table
+    up, speeds, turns, heights, uneven = 0, [], [], [], []
+    for _ in range(CARD_GAMES):
+        obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
+        env.command = np.array([v, w, h]); env.next_command = 10 ** 9
+        env.stand_hips = np.array([np.interp(h, hs, poses[:, i]) for i in range(4)])
+        obs = env.observe()
+        while True:
+            obs, r, fell, timeup, info = env.step(model.predict(obs, deterministic=True)[0])
+            if env.steps > 4 * POLICY_HZ:
+                f, t = env.body_speed(); speeds.append(f); turns.append(t); heights.append(env.height())
+                legs = env.leg_lengths(); uneven.append(abs(legs[0] - legs[1]))
+            if fell or timeup:
+                up += not fell
+                break
+    return (f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
+            f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
+            f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm")
+
+
+def test(path):
+    """Report card for driving: how well it follows commands, at full realism, no random shoves.
+    Every game starts nearly upright (+/-2 deg): this card tests driving. The balance card tests big leans.
+    The lines run in parallel, one per CPU core. Pass mark: every line stays up CARD_GAMES/CARD_GAMES."""
+    from multiprocessing import Pool
+    print("DRIVING REPORT CARD for", path, flush=True)
+    with Pool(min(len(CARD), os.cpu_count() or 4)) as pool:
+        for line in pool.imap(card_line, [(path, c, 7 + k) for k, c in enumerate(CARD)]):
+            print(line, flush=True)
+
+
+if __name__ == "__main__":
+    if "--test" in sys.argv:
+        run = os.environ.get("RUN", "drive_v1")
+        test(os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", run, "latest.zip"))
+    else:
+        env = DriveEnv(seed=0, shoves=False)
+        t = []
+        for g in range(10):
+            obs = env.reset()
+            while True:
+                obs, r, fell, up, info = env.step(np.zeros(env.n_act))
+                if fell or up:
+                    t.append(env.steps / POLICY_HZ); break
+        print(f"observation: {env.n_obs} numbers; do nothing lasts {np.mean(t):.2f} s on average")

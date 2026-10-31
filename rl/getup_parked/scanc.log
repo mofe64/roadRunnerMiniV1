@@ -1,0 +1,28 @@
+fs130_0 real=False front: 2700 moves -> {'never': 2522, 'flip': 178}
+fs130_0 real=False back: 2700 moves -> {'never': 2510, 'flip': 189, 'held10s': 1}
+    held: P1 (0.1, 1.2) w1 1.0 t1 0.4 w2 -1.0 t2 0.2 in envelope at 1.02 s
+fs160_0 real=False front: 2700 moves -> {'never': 2693, 'held10s': 3, 'flip': 4}
+    held: P1 (0.065, -0.6) w1 -1.0 t1 0.6 w2 1.0 t2 0.1 in envelope at 1.10 s
+    held: P1 (0.065, -0.6) w1 -0.5 t1 0.6 w2 1.0 t2 0.4 in envelope at 1.10 s
+    held: P1 (0.14, -1.2) w1 -1.0 t1 0.2 w2 1.0 t2 0.4 in envelope at 0.62 s
+fs160_0 real=False back: 2700 moves -> {'never': 2680, 'held10s': 8, 'flip': 11, 'envelope_then_fell': 1}
+    held: P1 (0.065, 0.6) w1 1.0 t1 0.2 w2 -0.5 t2 0.2 in envelope at 0.68 s
+    held: P1 (0.065, 1.2) w1 0.5 t1 0.6 w2 -0.5 t2 0.2 in envelope at 1.26 s
+    held: P1 (0.065, 1.2) w1 1.0 t1 0.2 w2 1.0 t2 0.1 in envelope at 0.78 s
+    held: P1 (0.1, 0.6) w1 1.0 t1 0.2 w2 -1.0 t2 0.4 in envelope at 0.62 s
+    held: P1 (0.1, 1.2) w1 0.5 t1 0.4 w2 -0.5 t2 0.1 in envelope at 1.02 s
+fs130_0 real=True front: 2700 moves -> {'never': 2556, 'flip': 143, 'held10s': 1}
+    held: P1 (0.065, -1.2) w1 -0.5 t1 0.4 w2 1.0 t2 0.2 in envelope at 1.08 s
+fs130_0 real=True back: 2700 moves -> {'never': 2531, 'flip': 169}
+fs160_0 real=True front: 2700 moves -> {'never': 2688, 'held10s': 5, 'flip': 7}
+    held: P1 (0.065, -1.2) w1 -1.0 t1 0.6 w2 0.0 t2 0.1 in envelope at 1.26 s
+    held: P1 (0.065, -1.2) w1 -0.5 t1 0.4 w2 0.5 t2 0.1 in envelope at 1.10 s
+    held: P1 (0.065, -0.6) w1 -1.0 t1 0.4 w2 0.5 t2 0.4 in envelope at 0.90 s
+    held: P1 (0.1, -1.2) w1 -1.0 t1 0.6 w2 0.5 t2 0.1 in envelope at 1.20 s
+    held: P1 (0.1, -1.2) w1 -1.0 t1 0.6 w2 1.0 t2 0.1 in envelope at 1.20 s
+fs160_0 real=True back: 2700 moves -> {'never': 2682, 'held10s': 6, 'flip': 12}
+    held: P1 (0.065, 0.0) w1 1.0 t1 0.6 w2 -1.0 t2 0.2 in envelope at 0.82 s
+    held: P1 (0.065, 0.6) w1 0.5 t1 0.6 w2 -1.0 t2 0.4 in envelope at 1.08 s
+    held: P1 (0.065, 0.6) w1 1.0 t1 0.2 w2 -0.5 t2 0.2 in envelope at 0.68 s
+    held: P1 (0.065, 0.6) w1 1.0 t1 0.4 w2 -1.0 t2 0.1 in envelope at 0.92 s
+    held: P1 (0.065, 1.2) w1 1.0 t1 0.4 w2 0.0 t2 0.1 in envelope at 1.08 s

@@ -9,3 +9,5 @@ rl/runs/
 rl/checkpoints/
 wandb/
 cad/biped_v02/*.step
+rl/pi/config.json
+rl/pi/logs/

@@ -1,5 +1,5 @@
 import os, math, sys
-os.environ.setdefault('MODEL_XML', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'eggbot_v03.xml'))
+os.environ.setdefault('MODEL_XML', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'roadrunner_mini.xml'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tests as T, mujoco, numpy as np
 def settle(face, p0, h):

@@ -1,0 +1,180 @@
+
+<mujoco model="roadrunner_mini">
+  <compiler angle="radian" autolimits="true" meshdir="meshes"/>
+  <option timestep="0.001" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <default>
+    <geom contype="1" conaffinity="1" friction="0.9 0.005 0.0001" group="3"/>
+    <default class="link"><geom contype="2" conaffinity="0"/></default>
+    <default class="sts3215">
+      <joint damping="0.6" frictionloss="0.052" armature="0.028"/>
+      <position kp="17.8" kv="0" forcerange="-1.5 1.5"/>
+    </default>
+    <!-- gear slop: a tiny free joint that can wobble +/-0.5 deg behind the servo -->
+    <default class="backlash"><joint damping="0.01" frictionloss="0" armature="0.0001" limited="true" range="-0.0087 0.0087"/></default>
+    <default class="visual"><geom type="mesh" contype="0" conaffinity="0" group="2" mass="0"/></default>
+    <equality solref="0.004 1"/>
+  </default>
+  <asset>
+    <mesh name="torso_shell" file="torso_shell.stl" inertia="shell"/>
+    <mesh name="torso_parts" file="torso_parts.stl" inertia="shell"/>
+    <mesh name="torso_pi" file="torso_pi.stl" inertia="shell"/>
+    <mesh name="yaw_servo" file="yaw_servo.stl" inertia="shell"/>
+    <mesh name="neck" file="neck.stl" inertia="shell"/>
+    <mesh name="head" file="head.stl" inertia="shell"/>
+    <mesh name="oak" file="oak.stl" inertia="shell"/>
+    <mesh name="up_f_L" file="up_f_L.stl" inertia="shell"/>
+    <mesh name="up_r_L" file="up_r_L.stl" inertia="shell"/>
+    <mesh name="low_f_L" file="low_f_L.stl" inertia="shell"/>
+    <mesh name="low_r_L" file="low_r_L.stl" inertia="shell"/>
+    <mesh name="axle_L" file="axle_L.stl" inertia="shell"/>
+    <mesh name="wheel_L" file="wheel_L.stl" inertia="shell"/>
+    <mesh name="up_f_R" file="up_f_R.stl" inertia="shell"/>
+    <mesh name="up_r_R" file="up_r_R.stl" inertia="shell"/>
+    <mesh name="low_f_R" file="low_f_R.stl" inertia="shell"/>
+    <mesh name="low_r_R" file="low_r_R.stl" inertia="shell"/>
+    <mesh name="axle_R" file="axle_R.stl" inertia="shell"/>
+    <mesh name="wheel_R" file="wheel_R.stl" inertia="shell"/>
+    <texture type="skybox" builtin="gradient" rgb1="0.9 0.93 0.97" rgb2="1 1 1" width="64" height="64"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.82 0.82 0.82" rgb2="0.9 0.9 0.9" width="256" height="256"/>
+    <material name="grid" texture="grid" texrepeat="8 8" reflectance="0.05"/>
+  </asset>
+  <worldbody>
+    <light pos="0.5 -1 2" dir="-0.3 0.5 -1" diffuse="0.9 0.9 0.9"/>
+    <light pos="-1 1 1.5" dir="0.5 -0.5 -1" diffuse="0.4 0.4 0.4"/>
+    <geom name="floor" type="plane" size="3 3 0.1" material="grid" contype="1" conaffinity="3" group="0" friction="0.5 0.005 0.0001"/>  <!-- low on purpose: MuJoCo uses the larger of the two, so the tyre sets the grip -->
+    <body name="torso" pos="0 0 0.155">
+        <geom class="visual" mesh="torso_shell" rgba="0.93 0.90 0.84 1"/>
+        <geom class="visual" mesh="torso_parts" rgba="0.18 0.18 0.2 1"/>
+        <geom class="visual" mesh="torso_pi" rgba="0.15 0.45 0.25 1"/>
+        <geom class="visual" mesh="yaw_servo" rgba="0.18 0.18 0.2 1"/>
+      <freejoint name="root"/>
+      <site name="imu" pos="0 0 0.02" size="0.004"/>
+      <!-- torso: rounded box, hips at its bottom; one inertial for the Body and the yaw servo -->
+      <inertial pos="-0.0022 0.0000 0.0285" mass="1.0600" diaginertia="2.2924e-03 3.7538e-03 3.2521e-03"/>
+      <geom name="shell" type="box" size="0.059 0.034 0.0575" pos="0 0 0.025" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="box" size="0.059 0.05 0.0415" pos="0 0 0.025" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="box" size="0.075 0.034 0.0415" pos="0 0 0.025" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="0.059 -0.034 0.0665 0.059 0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom name="chin" type="capsule" fromto="0.059 -0.034 -0.0165 0.059 0.034 -0.0165" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="0.059 0.034 -0.0165 0.059 0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="0.059 -0.034 -0.0165 0.059 -0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 -0.034 0.0665 -0.059 0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom name="tail" type="capsule" fromto="-0.059 -0.034 -0.0165 -0.059 0.034 -0.0165" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 0.034 -0.0165 -0.059 0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 -0.034 -0.0165 -0.059 -0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 0.034 0.0665 0.059 0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 0.034 -0.0165 0.059 0.034 -0.0165" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 -0.034 0.0665 0.059 -0.034 0.0665" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom type="capsule" fromto="-0.059 -0.034 -0.0165 0.059 -0.034 -0.0165" size="0.016" mass="0" rgba="0.93 0.90 0.84 1"/>
+      <geom name="bump_front" type="capsule" fromto="0.16 -0.03 0.0 0.16 0.03 0.0" size="0.012" mass="0" rgba="0.9 0.3 0.2 1"/>
+      <geom name="bump_back" type="capsule" fromto="-0.16 -0.03 0.0 -0.16 0.03 0.0" size="0.012" mass="0" rgba="0.9 0.3 0.2 1"/>
+      <geom name="yaw_servo" type="box" size="0.0227 0.0124 0.0189" pos="-0.0085 0 0.0988" rgba="0.2 0.2 0.25 1"/>
+      <body name="neck" pos="0.004 0.0 0.1177">
+        <geom class="visual" mesh="neck" rgba="0.93 0.90 0.84 1"/>
+        <joint name="head_yaw" class="sts3215" type="hinge" axis="0 0 1" range="-1.571 1.571"/>
+        <geom name="pitch_bracket" class="link" type="box" size="0.012 0.02 0.012" pos="-0.0014 0.0047 0.0146" mass="0.0136" rgba="0.2 0.2 0.25 1"/>
+      <body name="head" pos="0 0 0.0213">
+        <geom class="visual" mesh="head" rgba="0.93 0.90 0.84 1"/>
+        <geom class="visual" mesh="oak" rgba="0.18 0.18 0.2 1"/>
+        <joint name="head_pitch" class="sts3215" type="hinge" axis="0 1 0" range="-0.524 0.873"/>
+        <inertial pos="0.0122 0.0011 0.0196" mass="0.2008" diaginertia="2.380e-04 2.233e-04 3.199e-04"/>
+        <geom type="ellipsoid" size="0.04775 0.05 0.0325" pos="0.00175 0 0.0195" mass="0" rgba="0.93 0.90 0.84 1"/>
+        <site name="cam" pos="0.04775 0 0.0325" size="0.003"/>
+      </body>
+      </body>
+      
+      <body name="up_f_L" pos="0.025 0.05500000000000001 0">
+        <geom class="visual" mesh="up_f_L" rgba="0.93 0.90 0.84 1"/>
+        <joint name="hip_f_L" class="sts3215" type="hinge" axis="0 1 0" range="-2.4 2.4"/>
+        <joint name="hip_f_L_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+        <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.004" mass="0.0071" rgba="0.85 0.85 0.85 1"/>
+        <body name="low_f_L" pos="0 0 -0.06">
+        <geom class="visual" mesh="low_f_L" rgba="0.93 0.90 0.84 1"/>
+          <joint name="knee_f_L" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.1" size="0.004" mass="0.0146" rgba="0.85 0.85 0.85 1"/>
+          <body name="axle_L" pos="0 0 -0.1">
+        <geom class="visual" mesh="axle_L" rgba="0.18 0.18 0.2 1"/>
+            <geom class="link" type="box" size="0.012 0.0225 0.0175" pos="0.0091 -0.0153 0.0103" mass="0.06" rgba="0.2 0.2 0.25 1"/>
+            <site name="axle_L" pos="0 0 0" size="0.003"/>
+            <body name="wheel_L" pos="0 0.0142 0">
+        <geom class="visual" mesh="wheel_L" rgba="0.08 0.08 0.08 1"/>
+              <joint name="wheel_L" type="hinge" axis="0 1 0" damping="0.0005" frictionloss="0.022" armature="0.004"/>
+              <joint name="wheel_L_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+              <geom type="cylinder" size="0.035 0.0055" quat="0.7071 0.7071 0 0" mass="0.0114" rgba="0.1 0.1 0.1 1" friction="1.0 0.005 0.0001" condim="3"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="up_r_L" pos="-0.025 0.05500000000000001 0">
+        <geom class="visual" mesh="up_r_L" rgba="0.93 0.90 0.84 1"/>
+        <joint name="hip_r_L" class="sts3215" type="hinge" axis="0 1 0" range="-2.4 2.4"/>
+        <joint name="hip_r_L_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+        <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.004" mass="0.0071" rgba="0.85 0.85 0.85 1"/>
+        <body name="low_r_L" pos="0 0 -0.06">
+        <geom class="visual" mesh="low_r_L" rgba="0.93 0.90 0.84 1"/>
+          <joint name="knee_r_L" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.1" size="0.004" mass="0.0235" rgba="0.85 0.85 0.85 1"/>
+          <site name="tip_r_L" pos="0 0 -0.1" size="0.003"/>
+        </body>
+      </body>
+      
+      <body name="up_f_R" pos="0.025 -0.05500000000000001 0">
+        <geom class="visual" mesh="up_f_R" rgba="0.93 0.90 0.84 1"/>
+        <joint name="hip_f_R" class="sts3215" type="hinge" axis="0 1 0" range="-2.4 2.4"/>
+        <joint name="hip_f_R_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+        <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.004" mass="0.0071" rgba="0.85 0.85 0.85 1"/>
+        <body name="low_f_R" pos="0 0 -0.06">
+        <geom class="visual" mesh="low_f_R" rgba="0.93 0.90 0.84 1"/>
+          <joint name="knee_f_R" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.1" size="0.004" mass="0.0146" rgba="0.85 0.85 0.85 1"/>
+          <body name="axle_R" pos="0 0 -0.1">
+        <geom class="visual" mesh="axle_R" rgba="0.18 0.18 0.2 1"/>
+            <geom class="link" type="box" size="0.012 0.0225 0.0175" pos="0.0091 0.0153 0.0103" mass="0.06" rgba="0.2 0.2 0.25 1"/>
+            <site name="axle_R" pos="0 0 0" size="0.003"/>
+            <body name="wheel_R" pos="0 -0.0142 0">
+        <geom class="visual" mesh="wheel_R" rgba="0.08 0.08 0.08 1"/>
+              <joint name="wheel_R" type="hinge" axis="0 1 0" damping="0.0005" frictionloss="0.022" armature="0.004"/>
+              <joint name="wheel_R_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+              <geom type="cylinder" size="0.035 0.0055" quat="0.7071 0.7071 0 0" mass="0.0114" rgba="0.1 0.1 0.1 1" friction="1.0 0.005 0.0001" condim="3"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="up_r_R" pos="-0.025 -0.05500000000000001 0">
+        <geom class="visual" mesh="up_r_R" rgba="0.93 0.90 0.84 1"/>
+        <joint name="hip_r_R" class="sts3215" type="hinge" axis="0 1 0" range="-2.4 2.4"/>
+        <joint name="hip_r_R_backlash" class="backlash" type="hinge" axis="0 1 0"/>
+        <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.004" mass="0.0071" rgba="0.85 0.85 0.85 1"/>
+        <body name="low_r_R" pos="0 0 -0.06">
+        <geom class="visual" mesh="low_r_R" rgba="0.93 0.90 0.84 1"/>
+          <joint name="knee_r_R" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom class="link" type="capsule" fromto="0 0 0 0 0 -0.1" size="0.004" mass="0.0235" rgba="0.85 0.85 0.85 1"/>
+          <site name="tip_r_R" pos="0 0 -0.1" size="0.003"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <equality>
+    <connect name="fivebar_L" site1="tip_r_L" site2="axle_L"/>
+    <connect name="fivebar_R" site1="tip_r_R" site2="axle_R"/>
+  </equality>
+  <actuator>
+    <position name="hip_f_L" joint="hip_f_L" class="sts3215"/>
+    <position name="hip_r_L" joint="hip_r_L" class="sts3215"/>
+    <position name="hip_f_R" joint="hip_f_R" class="sts3215"/>
+    <position name="hip_r_R" joint="hip_r_R" class="sts3215"/>
+    <position name="head_yaw" joint="head_yaw" class="sts3215"/>
+    <position name="head_pitch" joint="head_pitch" class="sts3215"/>
+    <!-- wheels: torque = ctrl - (HS_TORQUE/HS_VEL) * wheel speed, so no torque is left at HS_VEL -->
+    <general name="wheel_L" joint="wheel_L" gainprm="1" biastype="affine" biasprm="0 0 -0.1796" ctrlrange="-2.100 2.100" forcerange="-2.100 2.100"/>
+    <general name="wheel_R" joint="wheel_R" gainprm="1" biastype="affine" biasprm="0 0 -0.1796" ctrlrange="-2.100 2.100" forcerange="-2.100 2.100"/>
+  </actuator>
+  <sensor>
+    <gyro name="gyro" site="imu"/>
+    <accelerometer name="acc" site="imu"/>
+    <framequat name="torso_quat" objtype="site" objname="imu"/>
+  </sensor>
+  <keyframe>
+    <key name="stand" qpos="0 0 0.155 1 0 0 0  0 0  -0.7388325212722737 0 1.451765447316472 0 0 0.7388325212722737 0 -1.451765447316472  -0.7388325212722737 0 1.451765447316472 0 0 0.7388325212722737 0 -1.451765447316472"/>
+  </keyframe>
+</mujoco>
