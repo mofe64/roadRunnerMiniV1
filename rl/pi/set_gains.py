@@ -11,7 +11,10 @@ of the force of the other three hips and moves at half their speed. All settings
 the servo itself. Use hip_bench.py after each change to check that the four hips follow the same way.
 Found 2026-10-31 (read of addresses 70..85): the cause is register 0x55 "maximum acceleration". It is 254
 on all servos but 50 on the rear-right hip, so that servo ramps its force up 5 times slower. This script
-also sets 0x55 = 254 on all 6 servos (the LeRobot SO-100 setup does the same).
+also sets 0x55 on all 6 servos.
+Found 2026-10-31 23:12 (hip_bench.py with 0x55 = 0 on one hip): 0x55 is an acceleration LIMIT (254 x 100 counts/s^2
+= 39 rad/s^2); 0 = no limit. With 0 the hip does an 8 deg step in 77 ms instead of 131 ms and a 20 deg step in
+112 ms instead of 182 ms (top speed 4.3 rad/s, the data sheet value). So all servos now get 0 (fastest).
 """
 import sys
 import time
@@ -19,7 +22,7 @@ import sts
 from robot import load_config, open_buses, HIPS, HEAD
 
 P_ADDR = 0x15
-MAX_ACC_ADDR, MAX_ACC = 0x55, 254
+MAX_ACC_ADDR, MAX_ACC = 0x55, 0
 cfg = load_config()
 legs, _ = open_buses(cfg)
 if len(sys.argv) == 4 and sys.argv[1] == "acc":
