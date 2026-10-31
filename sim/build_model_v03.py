@@ -49,9 +49,18 @@ M_WHEEL = float(__import__('os').environ.get('M_WHEEL', '0.0114'))   # wheel 0.0
 WHEEL_OFFSET = 0.0142                    # leg plane to tyre centre (track 138 mm)
 WHEEL_HALF_W = 0.0055
 
-STS_TORQUE = 1.5   # Nm, 7.4 V STS3215 limit used in sim (stall 1.9)
-# STS3215 servo model measured by Open Duck Mini (system identification), reused for hips and head:
-STS_KP, STS_DAMPING, STS_FRICTIONLOSS, STS_ARMATURE = 17.8, 0.60, 0.052, 0.028
+# STS3215 hip servo model MEASURED 2026-10-31 on this robot (rl/pi/hip_bench.py, legs in the air, register
+# 0x55 = 0 = no acceleration limit, as set_gains.py sets it now). Data: sim/data/hip_bench_20261031_231154_8deg.csv
+# and _231209_20deg.csv (front-left hip). Real: 8 deg step 50 % at 54 ms, 90 % at 76 ms; 20 deg step 50 % at
+# 78 ms, 90 % at 112 ms, top 4.3 rad/s (data sheet 4.7). Fit (sim/fit_hip_servo.py, both step sizes together):
+# error 0.022; force 1.94 Nm = the stall torque, so the fit is physical. The fitted pure delay (24 ms) is the
+# same as the command delay every game already gets (ACT_DELAY_MS 10-30 in balance_env.py), so it is not added.
+# Before: Open Duck Mini values (kp 17.8, damping 0.60, armature 0.028, no filter). With the factory
+# acceleration limit (0x55 = 254) the real hip was 1.7x slower; that limit is now switched off on the robot.
+# Friction is still the Open Duck value (the step fit cannot separate it from damping).
+STS_TORQUE = 1.94  # Nm (fitted; stall 1.9 at 7.4 V)
+STS_KP, STS_DAMPING, STS_FRICTIONLOSS, STS_ARMATURE = 98.8, 0.49, 0.052, 0.0037
+STS_TIMECONST = 0.024   # s: the servo's own command smoothing (fitted)
 BACKLASH = 0.0087  # rad: +/-0.5 deg of gear slop behind each hip servo (Open Duck value)
 # Wheel servo (ST3215-HS) gearbox: NOT measured yet. Guess scaled from the STS3215: it is about
 # 2.4x faster, so a ~2.4x lower gear ratio -> friction /2.4 and rotor inertia /2.4^2. Same backlash.
@@ -220,7 +229,7 @@ def build(h_stand=0.120, shell="box"):
     <default class="link"><geom contype="2" conaffinity="0"/></default>
     <default class="sts3215">
       <joint damping="{STS_DAMPING}" frictionloss="{STS_FRICTIONLOSS}" armature="{STS_ARMATURE}"/>
-      <position kp="{STS_KP}" kv="0" forcerange="-{STS_TORQUE} {STS_TORQUE}"/>
+      <position kp="{STS_KP}" kv="0" forcerange="-{STS_TORQUE} {STS_TORQUE}" timeconst="{STS_TIMECONST}"/>
     </default>
     <!-- gear slop: a tiny free joint that can wobble +/-0.5 deg behind the servo -->
     <default class="backlash"><joint damping="0.01" frictionloss="0" armature="0.0001" limited="true" range="-{BACKLASH} {BACKLASH}"/></default>

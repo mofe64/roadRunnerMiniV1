@@ -18,6 +18,8 @@ class Controller:
         self.n_act = int(c["n_act"])
         self.mirror = bool(c["mirror"])
         self.command = np.array([0.0, 0.0, float(c["height_normal"])])
+        self.hold_max = float(c["hold_max"]) if "hold_max" in c else None   # brains before drive_021 have no hold odometer
+        self.hold = 0.0
         self.stand = brain.stand_hips(self.command[2])
 
     def set_command(self, speed, turn, height):
@@ -30,11 +32,11 @@ class Controller:
         if not np.allclose(new, self.command):
             self.command = new
             self.stand = self.brain.stand_hips(new[2])
-            self.lag = self.heading_lag = 0.0
+            self.lag = self.heading_lag = self.hold = 0.0
 
     def reset(self, hip_q):
         self.steps = 0
-        self.lag = self.heading_lag = 0.0
+        self.lag = self.heading_lag = self.hold = 0.0
         self.last_action = np.zeros(self.n_act)
         self.hip_target = np.asarray(hip_q, dtype=float).copy()
 
@@ -46,9 +48,12 @@ class Controller:
                                      -float(c["lag_max"]), float(c["lag_max"])))
             self.heading_lag = float(np.clip(float(c["leak"]) * self.heading_lag + (self.command[1] - gyro[2]) / self.hz,
                                              -float(c["heading_lag_max"]), float(c["heading_lag_max"])))
+            if self.hold_max is not None and self.command[0] == 0.0:
+                self.hold = float(np.clip(self.hold + float(c["wheel_r"]) * np.mean(wheel_v) / self.hz, -self.hold_max, self.hold_max))
         cmd = (self.command - [0, 0, float(c["height_normal"])]) / np.array([float(c["speed_max"]), float(c["turn_max"]), 0.05])
         frame = np.concatenate([gravity, gyro, np.asarray(hip_q, float) - self.stand, np.asarray(hip_v, float) * 0.1,
-                                wheel_v * 0.1, cmd, [self.lag / float(c["lag_max"]), self.heading_lag / float(c["heading_lag_max"])],
+                                wheel_v * 0.1, cmd, [self.lag / float(c["lag_max"]), self.heading_lag / float(c["heading_lag_max"])]
+                                + ([self.hold / self.hold_max] if self.hold_max is not None else []),
                                 self.last_action])
         if self.history == 1:
             return frame.astype(np.float32)

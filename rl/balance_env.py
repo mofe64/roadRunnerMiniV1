@@ -47,6 +47,9 @@ MAX_DELAY = int(os.environ.get("MAX_DELAY", "1"))   # IMU readings arrive 0-1 st
 # measured 10-25 ms dead time in PWM mode, so each game gets a delay of 10-30 ms, in physics steps.
 # Before this it was 0-40 ms in whole 20 ms steps (as Open Duck), and 40 ms caused most falls (diag_017.py).
 ACT_DELAY_MS = tuple(float(x) for x in os.environ.get("ACT_DELAY_MS", "10,30").split(","))
+# Extra hip delay in decisions. 0: the fitted servo delay (24 ms, sim/build_model_v03.py) is covered by
+# ACT_DELAY_MS. Kept as a knob for tests (with the old 0x55 = 254 acceleration limit it would have been 1).
+HIP_DELAY = int(os.environ.get("HIP_DELAY", "0"))   # decisions
 HIP_MAX_SPEED = 4.7       # rad/s: STS3215 top speed at 7.4 V (0.222 s per 60 deg)
 # Sensor errors (uniform +/-), like a real robot (independent review 2026-10-30). The old values came from
 # Open Duck and were much larger: gravity 0.05, gyro 0.2, hip_pos 0.03, hip_vel 2.5.
@@ -121,7 +124,8 @@ class BalanceEnv:
         self.nominal = dict(mass=m.body_mass.copy(), ipos=m.body_ipos.copy(), friction=m.geom_friction.copy(),
                             gain=m.actuator_gainprm.copy(), bias=m.actuator_biasprm.copy(),
                             frictionloss=m.dof_frictionloss.copy(), armature=m.dof_armature.copy(),
-                            jnt_range=m.jnt_range.copy())
+                            jnt_range=m.jnt_range.copy(), dynprm=m.actuator_dynprm.copy())
+        self.filtered = [a for a in range(m.nu) if m.actuator_dyntype[a] != mujoco.mjtDyn.mjDYN_NONE]
 
     def ablate(self, parts):
         """Turn parts of the v3 servo model off (for experiments only)."""
@@ -186,7 +190,8 @@ class BalanceEnv:
         late, self.old_substeps = divmod(self.act_delay, self.substeps)
         self.old_ctrl = self.d.ctrl.copy()              # the command now at the servos (one decision older)
         a = self.action_history[late]
-        target = self.stand_hips + HIP_RANGE * a[:4] - self.hip_offset      # the servo's own zero is slightly off
+        a_hip = self.action_history[late + (HIP_DELAY if self.realism and "delay" not in ABLATE else 0)]
+        target = self.stand_hips + HIP_RANGE * a_hip[:4] - self.hip_offset      # the servo's own zero is slightly off
         if self.realism and "hipspeed" not in ABLATE:   # the servo cannot move faster than its top speed
             step = HIP_MAX_SPEED / POLICY_HZ
             target = np.clip(target, self.hip_target - step, self.hip_target + step)
@@ -233,6 +238,7 @@ class BalanceEnv:
         m.actuator_gainprm[self.hip_act, 0] = k
         m.actuator_biasprm[self.hip_act, 1] = -k
         m.dof_frictionloss[self.hip_dof] = nom["frictionloss"][self.hip_dof] * (1 + r(-0.1, 0.1, 4))
+        m.actuator_dynprm[self.hip_act, 0] = nom["dynprm"][self.hip_act, 0] * (1 + r(-0.1, 0.1, 4))   # servo filter +/-10 % (measured)
         self.hip_offset = r(-0.03, 0.03, 4)                                        # servo zero offsets +/-1.7 deg
         self.wheel_strength = 1.0 + r(BATTERY[0] - 1.0, BATTERY[1] - 1.0)          # battery charge 0.85-1.135
         self.gravity_bias = 0.0 if "noise" in ABLATE else r(-GRAVITY_BIAS, GRAVITY_BIAS, 3)   # IMU mounted slightly crooked
@@ -263,11 +269,15 @@ class BalanceEnv:
             pitch = self.rng.uniform(-lean, lean)
         d.qpos[3:7] = [np.cos(pitch / 2), 0.0, np.sin(pitch / 2), 0.0]
         d.qvel[:6] = self.rng.normal(0.0, 0.05, 6)          # a small random nudge
+        # servo command filters (sim/build_model_v03.py STS_TIMECONST) start at the joint's present angle, so nothing jumps
+        for a in self.filtered:
+            d.act[m.actuator_actadr[a]] = d.qpos[m.jnt_qposadr[m.actuator_trnid[a, 0]]]
+            d.ctrl[a] = d.act[m.actuator_actadr[a]]
         mujoco.mj_forward(m, d)
         self.wheel_start = np.mean(d.qpos[self.wheel_q])
         self.steps = 0
         self.last_action = np.zeros(self.n_act)
-        self.action_history = np.zeros((int(ACT_DELAY_MS[1] / 1000 * POLICY_HZ) + 2, 6))
+        self.action_history = np.zeros((int(ACT_DELAY_MS[1] / 1000 * POLICY_HZ) + 2 + HIP_DELAY, 6))
         self.imu_history = np.tile(np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 1, 1))
         self.hip_target = d.qpos[self.hip_q].copy()
         return self.observe()

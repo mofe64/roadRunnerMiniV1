@@ -31,7 +31,7 @@ def export(run):
         wheel_r=be.WHEEL_R, hip_range=be.HIP_RANGE, hip_max_speed=be.HIP_MAX_SPEED,
         speed_max=de.SPEED_MAX, reverse_max=de.REVERSE_MAX, turn_max=de.TURN_MAX,
         height_normal=de.HEIGHT_NORMAL, height_range=np.array(de.HEIGHT_RANGE),
-        lag_max=de.LAG_MAX, heading_lag_max=de.HEADING_LAG_MAX, leak=de.LEAK,
+        lag_max=de.LAG_MAX, heading_lag_max=de.HEADING_LAG_MAX, leak=de.LEAK, hold_max=de.HOLD_MAX,
         pose_h=hs, pose_hips=poses, run=run)
     path = os.path.join(HERE, f"brain_{run}.npz")
     np.savez(path, **out)

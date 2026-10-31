@@ -31,6 +31,12 @@ HEADING_LAG_MAX = 0.5     # rad: the "off my heading" signal is capped at about 
 # Both signals slowly forget old errors (half gone after about 1.4 s), so they cannot get stuck at the cap
 # ("integrator wind-up"): a test of drive_016 showed them pinned at the cap for whole games.
 LEAK = 0.99
+# "Hold here" odometer (independent review 2026-10-31): while the speed command is 0, how far the robot has
+# rolled since that command started (m, + = ahead). It does NOT leak, so a slow creep stays visible
+# (the lag above forgets it in ~2 s; drive_020 crept 0.9 m on the real robot and fell). 0 while driving.
+HOLD_MAX = 1.0            # m: clipped, as the odometer in balance_env
+HOLD_W = float(os.environ.get("HOLD_W", "1.0"))     # score: -HOLD_W x (m off)^2 while holding
+HIP_W = float(os.environ.get("HIP_W", "0.1"))       # score: -HIP_W x mean(hip action^2): do not live at the hip limit
 # Experiments: DRIVE_PARTS=speed trains speed commands only (no turns, no height changes)
 CARD_GAMES = int(os.environ.get("CARD_GAMES", "50"))   # games per report card line (6 was too few: one fall = 17 %)
 DRIVE_PARTS = os.environ.get("DRIVE_PARTS", "speed,turn,height").split(",")
@@ -44,7 +50,7 @@ class DriveEnv(BalanceEnv):
     def __init__(self, seed=None, shoves=True, realism=True):
         super().__init__(seed, shoves, realism)
         self.start_lean, self.shove_max = DRIVE_START_LEAN, DRIVE_SHOVE_MAX
-        self.n_frame = 3 + 3 + 4 + 4 + 2 + 3 + 2 + self.n_act   # the odometer is replaced by the 3 commands + 2 lags
+        self.n_frame = 3 + 3 + 4 + 4 + 2 + 3 + 2 + 1 + self.n_act   # 3 commands + 2 lags + the hold odometer
         self.n_obs = self.n_frame * HISTORY
         self.command = np.array([0.0, 0.0, HEIGHT_NORMAL])
         self.axles = [self.m.body("axle_L").id, self.m.body("axle_R").id]
@@ -54,6 +60,7 @@ class DriveEnv(BalanceEnv):
         self.stand_normal = self.stand_hips.copy()
 
     def new_command(self):
+        was_stop = getattr(self, "command", None) is not None and self.command[0] == 0.0
         top = SPEED_MAX_EASY + (SPEED_MAX - SPEED_MAX_EASY) * self.difficulty
         back = min(top, REVERSE_MAX)   # backwards is capped lower than forwards
         # the height range also grows with the level: 115-125 mm at level 0, 80-135 mm at level 100 %
@@ -72,6 +79,8 @@ class DriveEnv(BalanceEnv):
         self.stand_hips = np.array([np.interp(self.command[2], hs, poses[:, i]) for i in range(4)])
         self.next_command = self.steps + int(self.rng.uniform(*NEW_COMMAND_EVERY) * POLICY_HZ)
         self.lag = self.heading_lag = 0.0         # a new command starts a new schedule
+        if not (was_stop and self.command[0] == 0.0):
+            self.hold = 0.0                       # "stand still" again after "stand still": keep counting (as on the Pi)
 
     def body_speed(self):
         """True forward speed (m/s) and turn rate (rad/s) of the body, for the score only."""
@@ -108,13 +117,15 @@ class DriveEnv(BalanceEnv):
         # The same idea for turning: how far the heading is off from where the turn command would put it,
         # from the IMU's turn rate (gyro z). It fixes a slow drift to one side.
         if self.steps == 0:
-            self.lag = self.heading_lag = 0.0
+            self.lag = self.heading_lag = self.hold = 0.0
         else:
+            if self.command[0] == 0.0:
+                self.hold = float(np.clip(self.hold + WHEEL_R * np.mean(wheel_vel) / POLICY_HZ, -HOLD_MAX, HOLD_MAX))
             self.lag = float(np.clip(LEAK * self.lag + (self.command[0] - WHEEL_R * np.mean(wheel_vel)) / POLICY_HZ, -LAG_MAX, LAG_MAX))
             self.heading_lag = float(np.clip(LEAK * self.heading_lag + (self.command[1] - gyro[2]) / POLICY_HZ,
                                              -HEADING_LAG_MAX, HEADING_LAG_MAX))
         cmd = (self.command - [0, 0, HEIGHT_NORMAL]) / np.array([SPEED_MAX, TURN_MAX, 0.05])   # the joystick, about -1..1
-        frame = np.concatenate([gravity, gyro, hip_pos, hip_vel * 0.1, wheel_vel * 0.1, cmd, [self.lag / LAG_MAX, self.heading_lag / HEADING_LAG_MAX], self.last_action])
+        frame = np.concatenate([gravity, gyro, hip_pos, hip_vel * 0.1, wheel_vel * 0.1, cmd, [self.lag / LAG_MAX, self.heading_lag / HEADING_LAG_MAX, self.hold / HOLD_MAX], self.last_action])
         if HISTORY == 1:
             return frame.astype(np.float32)
         if self.steps == 0:
@@ -138,11 +149,13 @@ class DriveEnv(BalanceEnv):
         upright = -2.0 * tilt ** 2
         wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
         smooth = -0.05 * np.sum((action - self.last_action) ** 2)
+        hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
+        hold = -HOLD_W * self.hold ** 2 if self.command[0] == 0.0 else 0.0
         # keep both legs the same length (Mofe saw it stand with one leg higher): 1 cm difference costs 0.3
         # (measured in the body's own frame: on flat ground both wheels touch, so uneven legs show as a body roll)
         legs = self.leg_lengths()
         level = -0.3 * ((legs[0] - legs[1]) / 0.01) ** 2 if not MIRROR else 0.0   # mirrored legs need no penalty
-        return alive + go + steer + tall + upright + wobble + smooth + level, tilt
+        return alive + go + steer + tall + upright + wobble + smooth + level + hips + hold, tilt
 
     def reset(self, pitch=None):
         self.steps = 0
@@ -174,22 +187,31 @@ def card_line(job):
     env.max_steps = seconds * POLICY_HZ
     hs, poses = env.pose_table
     up, speeds, turns, heights, uneven = 0, [], [], [], []
+    creep, at_limit, wheel_peak, hip_mag = [], [], [], []   # standing quality (2026-10-31: the real robot crept forward and fell)
     for _ in range(CARD_GAMES):
         obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
         env.command = np.array([v, w, h]); env.next_command = 10 ** 9
         env.stand_hips = np.array([np.interp(h, hs, poses[:, i]) for i in range(4)])
         obs = env.observe()
+        x0, far, peak, lim, n = float(np.mean(env.d.qpos[env.wheel_q])), 0.0, 0.0, 0, 0
         while True:
-            obs, r, fell, timeup, info = env.step(model.predict(obs, deterministic=True)[0])
+            action = model.predict(obs, deterministic=True)[0]
+            obs, r, fell, timeup, info = env.step(action)
+            far = max(far, abs(float(np.mean(env.d.qpos[env.wheel_q])) - x0) * WHEEL_R)   # m from the start
+            peak = max(peak, float(np.max(np.abs(env.d.qvel[env.wheel_v]))))
+            lim += int(np.any(np.abs(action[:-2]) > 0.9)); n += 1; hip_mag.append(float(np.mean(np.abs(action[:-2]))))
             if env.steps > 4 * POLICY_HZ:
                 f, t = env.body_speed(); speeds.append(f); turns.append(t); heights.append(env.height())
                 legs = env.leg_lengths(); uneven.append(abs(legs[0] - legs[1]))
             if fell or timeup:
                 up += not fell
+                creep.append(far); wheel_peak.append(peak); at_limit.append(lim / max(n, 1))
                 break
+    quality = (f", mean |hip| {np.mean(hip_mag):.2f}, hips at limit {100 * np.mean(at_limit):.0f} %, wheel peak {np.max(wheel_peak):.1f} rad/s"
+               + (f", creep max {np.max(creep):.2f} m" if v == 0.0 and w == 0.0 else ""))
     return (f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
             f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
-            f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm")
+            f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm" + quality)
 
 
 def test(path):
