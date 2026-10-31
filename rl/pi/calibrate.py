@@ -8,17 +8,17 @@ Do the three parts one at a time, in any order. Each part saves its result:
   python3 calibrate.py legs     the 4 short links (hips)
   python3 calibrate.py head     head yaw and pitch
   python3 calibrate.py wheels   roll the robot forward on the floor
-  python3 calibrate.py center   only move each servo's middle (2048) to its measured zero
   python3 calibrate.py          all three, one after the other
-After "legs" or "head" the script writes each servo's offset register (EEPROM), so that the
-measured zero reads 2048, the middle of the 0..4095 count range. Then a joint never crosses
-the 0/4095 wrap point inside its working range. The zero in config.json becomes 2048.
+Each servo counts 0..4095 per turn. A joint must NOT cross the 0/4095 point inside its working range:
+near that point the servo can run the long way round (2026-10-31: the rear-left hip did this with an
+offset register set). So this script sets each offset register back to 0 (factory) and checks that
+each zero is far enough from 0/4095. If not, it tells you to run fix_horns.py.
 The servos stay limp (torque off) the whole time. Nothing moves by itself.
 """
 import sys
 PARTS = sys.argv[1:] or ["legs", "head", "wheels"]
-if any(p not in ("legs", "head", "wheels", "center") for p in PARTS):
-    raise SystemExit("Use: calibrate.py [legs] [head] [wheels] [center]")
+if any(p not in ("legs", "head", "wheels") for p in PARTS):
+    raise SystemExit("Use: calibrate.py [legs] [head] [wheels]")
 import numpy as np
 import sts
 from robot import HIPS, HEAD, WHEELS, RAD, load_config, save_config, open_buses
@@ -40,6 +40,38 @@ def count(bus, name):
     return c
 
 
+def offsets_to_zero(names):
+    import time
+    for n in names:
+        sid = ids[n]
+        legs.write(sid, sts.TORQUE_ENABLE, [0])
+        if sts.signed(legs.read2(sid, sts.OFFSET), 11) != 0:
+            legs.write(sid, sts.LOCK, [0]); legs.write2(sid, sts.OFFSET, 0); legs.write(sid, sts.LOCK, [1])
+            time.sleep(0.05)
+            print(f"  {n}: offset register set back to 0")
+
+
+# Working range of each joint in the simulator's angles (deg) with a margin. Every count in it must stay
+# inside 100..3995, away from the servo's 0/4095 point.
+RANGE = {"hip_f_L": (-110, 10), "hip_f_R": (-110, 10), "hip_r_L": (-10, 110), "hip_r_R": (-10, 110),
+         "head_yaw": (-100, 100), "head_pitch": (-40, 60)}
+BAD = []
+
+
+def seam_check(n):
+    z, sg = cfg["zero"][n], cfg["sign"][n]
+    ends = [z + sg * np.radians(a) / RAD for a in RANGE[n]]
+    if min(ends) < 100 or max(ends) > 3995:
+        BAD.append(n)
+        print(f"  WARNING {n}: zero {z}: its working range reaches counts {min(ends):.0f}..{max(ends):.0f}, "
+              f"over the 0/4095 point. Run fix_horns.py {n}.")
+
+
+if "legs" in PARTS:
+    offsets_to_zero(HIPS)
+if "head" in PARTS:
+    offsets_to_zero(HEAD)
+
 NICE = {"hip_f_L": "FRONT LEFT", "hip_r_L": "REAR LEFT", "hip_f_R": "FRONT RIGHT", "hip_r_R": "REAR RIGHT"}
 print(__doc__)
 for n in (HIPS if "legs" in PARTS else []):
@@ -57,6 +89,7 @@ for n in (HIPS if "legs" in PARTS else []):
     cfg["zero"][n] = z
     cfg["sign"][n] = -1 if d > 0 else 1        # forward = negative angle in the simulator
     print(f"  {n}: zero {z}, direction {cfg['sign'][n]:+d}, moved {abs(d) * RAD * 57.3:.0f} deg")
+    seam_check(n)
 
 if "head" in PARTS:
     input("\nHEAD: turn the head by hand so it looks straight ahead, nose level (phone on top of the head reads 0). Press Enter.")
@@ -69,6 +102,8 @@ if "head" in PARTS:
     input("Turn it back to straight, then tip the nose a little DOWN. Press Enter.")
     d = (count(legs, "head_pitch") - cfg["zero"]["head_pitch"] + 2048) % 4096 - 2048
     cfg["sign"]["head_pitch"] = 1 if d > 0 else -1         # + pitch = nose down (simulator)
+    for n in HEAD:
+        seam_check(n)
 
 if "wheels" in PARTS:
     import time
@@ -94,52 +129,7 @@ if "wheels" in PARTS:
         print(f"  {n}: direction {cfg['sign'][n]:+d}")
 
 
-def center(names):
-    """Move the servo's middle count (2048) to the measured zero with the offset register.
-    The servo reports present = raw - offset (sign bit 11). Wanted: raw_zero - new = 2048."""
-    import time
-    for n in names:
-        if n not in cfg["zero"]:
-            continue
-        sid = ids[n]
-        r = legs.read2(sid, sts.OFFSET)
-        if r is None:
-            raise SystemExit(f"{n} (ID {sid}) did not answer.")
-        old = sts.signed(r, 11)
-        new = (cfg["zero"][n] + old - 2048 + 2048) % 4096 - 2048
-        new = max(-2047, min(2047, new))
-        def put(v):
-            legs.write(sid, sts.TORQUE_ENABLE, [0])
-            legs.write(sid, sts.LOCK, [0])
-            legs.write2(sid, sts.OFFSET, sts.unsigned(v, 11))
-            legs.write(sid, sts.LOCK, [1])
-            time.sleep(0.05)
-            back = sts.signed(legs.read2(sid, sts.OFFSET), 11)
-            if back != v:
-                raise SystemExit(f"{n}: offset write failed (wrote {v}, read {back}).")
-        before = count(legs, n)
-        put(new)
-        now = count(legs, n)
-        want = (before + old - new) % 4096                      # present = raw - offset
-        if abs((now - want + 2048) % 4096 - 2048) > 8:
-            # This servo uses present = raw + offset: write the other sign.
-            new2 = max(-2047, min(2047, (2048 - (cfg["zero"][n] - old) + 2048) % 4096 - 2048))
-            put(new2)
-            now = count(legs, n)
-            want = (before - old + new2) % 4096
-            if abs((now - want + 2048) % 4096 - 2048) > 8:
-                put(old)
-                raise SystemExit(f"{n}: the offset did not act as expected. Old offset put back. Do not touch the legs while this runs; tell Claude.")
-            new = new2
-        cfg["zero"][n] = 2048
-        print(f"  {n}: offset {old} -> {new}. Zero is now 2048. Now at {(now - 2048) * RAD * 57.3:+.0f} deg from zero.")
-
-
-if "legs" in PARTS or "center" in PARTS:
-    print("\nCentering the hips (writes the servo offset):")
-    center(HIPS)
-if "head" in PARTS or "center" in PARTS:
-    print("\nCentering the head (writes the servo offset):")
-    center(HEAD)
 save_config(cfg)
-print("\nSaved config.json (" + ", ".join(PARTS) + "). When legs, head and wheels are all done: python3 check_imu.py")
+print("\nSaved config.json (" + ", ".join(PARTS) + ").")
+if BAD:
+    print("NOT READY: " + ", ".join(BAD) + " too close to the 0/4095 point. Run fix_horns.py, then this part again.")
