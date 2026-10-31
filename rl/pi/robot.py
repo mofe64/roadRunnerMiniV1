@@ -89,7 +89,8 @@ class Robot:
 
     # ---------- unit conversion ----------
     def to_rad(self, name, count):
-        return self.sign[name] * (count - self.zero[name]) * RAD
+        d = (count - self.zero[name] + sts.COUNTS // 2) % sts.COUNTS - sts.COUNTS // 2   # the count wraps at 4096
+        return self.sign[name] * d * RAD
 
     def to_count(self, name, rad):
         return int(round(self.zero[name] + self.sign[name] * rad / RAD))
