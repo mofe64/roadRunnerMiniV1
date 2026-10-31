@@ -1,20 +1,26 @@
 """Bench test of the hip servos: how fast and how stiff they follow a step. The result goes into the
 simulator's servo model (the "proper way": measure the actuator, then model it).
 
-  python3 hip_bench.py
+  python3 hip_bench.py              steps of 8 deg
+  python3 hip_bench.py 20           steps of 20 deg (the brain's full hip range), to measure the top speed
 Hold the robot in the AIR by the body, legs free. Each hip in turn does small steps (+8 deg, back,
 -8 deg, back) around the stand pose. The other hips hold the stand pose. Every position reading is
 saved with its time in logs/hip_bench_<time>.csv. Send that file to Claude.
-Safety: if a hip moves the wrong way or more than 20 deg from its target, all servos go limp at once.
+Safety: if a hip is more than (step + 12) deg from its target, all servos go limp at once.
 """
 import os
+import sys
 import time
 import numpy as np
 import sts
 from brain import Brain
 from robot import Robot, HIPS
 
-STEP = np.radians(8)
+STEP_DEG = float(sys.argv[1]) if len(sys.argv) > 1 else 8.0
+if not 1.0 <= STEP_DEG <= 20.0:
+    raise SystemExit("Step must be 1 to 20 deg.")
+STEP = np.radians(STEP_DEG)
+LIMIT = np.radians(STEP_DEG + 12)        # stop if a hip is further than this from its target
 brain = Brain("brain_drive_020.npz")
 robot = Robot(use_imu=False)
 robot.prepare()
@@ -30,7 +36,7 @@ for k in range(100):
 time.sleep(0.5)
 
 os.makedirs("logs", exist_ok=True)
-path = time.strftime("logs/hip_bench_%Y%m%d_%H%M%S.csv")
+path = time.strftime(f"logs/hip_bench_%Y%m%d_%H%M%S_{STEP_DEG:.0f}deg.csv")
 f = open(path, "w")
 f.write("t,hip,target,pos,speed,load\n")
 t0 = time.perf_counter()
@@ -49,7 +55,7 @@ try:
                 spd = robot.sign[n] * sts.signed(r[2] | (r[3] << 8)) * (2 * np.pi / 4096)
                 load = sts.signed(r[4] | (r[5] << 8), 10)
                 f.write(f"{time.perf_counter() - t0:.5f},{i},{tgt[i]:.5f},{pos:.5f},{spd:.4f},{load}\n")
-                if abs(pos - tgt[i]) > np.radians(20):
+                if abs(pos - tgt[i]) > LIMIT:
                     raise RuntimeError(f"{n} is {np.degrees(pos - tgt[i]):+.0f} deg from its target")
         print(f"  {n}: done")
 except RuntimeError as e:
