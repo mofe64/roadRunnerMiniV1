@@ -42,11 +42,14 @@ for n in (HIPS if "legs" in PARTS else []):
     input(f"\n{NICE[n]} short link (the link on the servo horn).\n"
           f"Push the knee by hand until this link hangs STRAIGHT DOWN (like a clock hand at 6). Hold it. Press Enter.")
     z = count(legs, n)
-    input("Now push the same knee a little toward the NOSE (about a finger width). Press Enter.")
-    c1 = count(legs, n)
-    d = (c1 - z + 2048) % 4096 - 2048
-    if abs(d) < 30:
-        print("  It did not move enough. Run calibrate.py again."); raise SystemExit(1)
+    while True:
+        input("Now turn the same link toward the NOSE: its bottom end swings forward, about 20 deg. Press Enter.")
+        c1 = count(legs, n)
+        d = (c1 - z + 2048) % 4096 - 2048
+        print(f"  The servo moved {abs(d) * RAD * 57.3:.0f} deg.")
+        if abs(d) >= 60:
+            break
+        print("  That is too small (need 5 deg or more). Turn it further. If it moved a lot and this still shows ~0, tell Claude.")
     cfg["zero"][n] = z
     cfg["sign"][n] = -1 if d > 0 else 1        # forward = negative angle in the simulator
     print(f"  {n}: zero {z}, direction {cfg['sign'][n]:+d}, moved {abs(d) * RAD * 57.3:.0f} deg")
