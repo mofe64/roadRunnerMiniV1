@@ -24,6 +24,7 @@ REVERSE_MAX = float(os.environ.get("REVERSE_MAX", "0.10"))   # m/s backwards at 
 TURN_MAX = 1.5            # rad/s (about 86 deg/s)
 NEW_COMMAND_EVERY = (2.0, 4.0)   # s: a new command after a random time in this range
 STOP_CHANCE = 0.2         # some commands are "stand still"
+STOP_SECONDS = (4.0, 10.0)   # s: "stand still" lasts longer than the other commands, so a slow creep costs points (real drive_023 crept 1 cm/s, 2026-11-01)
 HEIGHT_RANGE = (0.080, 0.135)   # m: hip-to-axle height commands (legs can do 65-140 mm; keep a margin)
 HEIGHT_NORMAL = 0.120
 LAG_MAX = 0.25            # m: the "behind schedule" signal is capped at 25 cm
@@ -36,6 +37,7 @@ LEAK = 0.99
 # (the lag above forgets it in ~2 s; drive_020 crept 0.9 m on the real robot and fell). 0 while driving.
 HOLD_MAX = 1.0            # m: clipped, as the odometer in balance_env
 HOLD_W = float(os.environ.get("HOLD_W", "1.0"))     # score: -HOLD_W x (m off)^2 while holding
+HOLD_LIN = float(os.environ.get("HOLD_LIN", "3.0"))  # score: -HOLD_LIN x |m off| while holding (10 cm costs 0.3; the square alone cost 0.01 at 10 cm)
 FLIP_BAND = 0.1                                      # wheel action must cross zero by more than this to count as a flip
 HIP_W = float(os.environ.get("HIP_W", "1.0"))       # score: -HIP_W x mean(hip action^2): stand with centred hips (0.1 was too small: review 2026-11-01 round 4)
 UPRIGHT_W = float(os.environ.get("UPRIGHT_W", "10.0"))   # score: -UPRIGHT_W x tilt^2: stand straight (2 let it lean 7 deg back, round 4)
@@ -80,7 +82,8 @@ class DriveEnv(BalanceEnv):
             self.command[2] = HEIGHT_NORMAL
         hs, poses = self.pose_table
         self.stand_hips = np.array([np.interp(self.command[2], hs, poses[:, i]) for i in range(4)])
-        self.next_command = self.steps + int(self.rng.uniform(*NEW_COMMAND_EVERY) * POLICY_HZ)
+        every = STOP_SECONDS if self.command[0] == 0.0 and self.command[1] == 0.0 else NEW_COMMAND_EVERY
+        self.next_command = self.steps + int(self.rng.uniform(*every) * POLICY_HZ)
         self.lag = self.heading_lag = 0.0         # a new command starts a new schedule
         if not (was_stop and self.command[0] == 0.0):
             self.hold = 0.0                       # "stand still" again after "stand still": keep counting (as on the Pi)
@@ -153,7 +156,7 @@ class DriveEnv(BalanceEnv):
         wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
         smooth = -SMOOTH_W * np.sum((action - self.last_action) ** 2)
         hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
-        hold = -HOLD_W * self.hold ** 2 if self.command[0] == 0.0 else 0.0
+        hold = -HOLD_W * self.hold ** 2 - HOLD_LIN * abs(self.hold) if self.command[0] == 0.0 else 0.0
         # keep both legs the same length (Mofe saw it stand with one leg higher): 1 cm difference costs 0.3
         # (measured in the body's own frame: on flat ground both wheels touch, so uneven legs show as a body roll)
         legs = self.leg_lengths()
@@ -200,6 +203,12 @@ def count_flips(A, band=FLIP_BAND):
     s = np.sign(np.asarray(A, float)) * (np.abs(np.asarray(A, float)) > band)
     s = s[s != 0]
     return int((np.diff(s) != 0).sum())
+
+
+def buzzing(g_rms, share):
+    """A buzz is real only when the 9-13 Hz part is big: band rms (sqrt(share) x gyro rms) > 0.10 rad/s AND
+    share > 30 %. A tiny signal is mostly noise, so the share alone is not enough (review round 5)."""
+    return bool(np.sqrt(share) * g_rms > 0.10 and share > 0.3)
 
 
 def buzz_numbers(G, A, DY, DW):
@@ -264,7 +273,7 @@ def card_line(job):
         quality += (f", gyro rms {g_rms:.2f}, 9-13 Hz {100 * share:.0f} %, flips {flips:.1f}/s"
                     + (f", d(wy)/d(wheel) {ratio:+.2f} (real -0.21..-0.25)" if freeze else ""))
         if v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01)
-            ok = (up == CARD_GAMES and g_rms < 0.3 and share < 0.3 and flips < 5 and np.mean(hip_mag) < 0.5
+            ok = (up == CARD_GAMES and g_rms < 0.3 and not buzzing(g_rms, share) and flips < 5 and np.mean(hip_mag) < 0.5
                   and np.max(creep) < 0.5)
             quality += "  MARKS " + ("PASS" if ok else "FAIL")
     return (("  [HARD PLANT]" if hard else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "

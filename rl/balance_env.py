@@ -86,7 +86,7 @@ NOISE = dict(gravity=0.005,     # IMU "down" jitter: 0.3 deg per reading
              hip_pos=0.003,     # rad: about 2 encoder counts (the servo zero error is hip_offset, per game)
              hip_vel=0.3,       # rad/s
              wheel_vel=0.5)     # rad/s
-GRAVITY_BIAS = 0.0175           # IMU mounted slightly crooked: up to 1 deg, the same for the whole game
+GRAVITY_BIAS = 0.035            # IMU mounted slightly crooked: up to 2 deg, the same for the whole game (real vs sim balance pitch differ 1.4 deg, review round 5)
 NOISE = {k: v * float(os.environ.get("NOISE_SCALE", "1.0")) for k, v in NOISE.items()}
 
 # Experiments: ABLATE=hips,wheelgear,backlash,hipspeed turns parts of the v3 servo model OFF, and
