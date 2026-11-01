@@ -4,6 +4,7 @@
   python3 run_brain.py --held      hold the robot upright on the floor with your hands near it
   python3 run_brain.py             normal run
   python3 run_brain.py --freeze-hips   test: hips held at the stand pose, the brain drives the wheels only
+  python3 run_brain.py --freeze-hips --gyro-lp 6 --fast-imu   test step 0 (review 2026-11-01)
 Keys (in this terminal): w/s faster/slower (0.05 m/s), a/d turn left/right (0.5 rad/s), r/f taller/lower (1 cm),
 space = stand still, q = stop. The robot STOPS by itself if it tips more than 25 deg, if the battery is low,
 or if a servo stops answering. When it stops, the legs go limp: be ready to catch it.
@@ -23,6 +24,8 @@ ap.add_argument("--brain", default=os.path.join(HERE, "brain_drive_020.npz"))
 ap.add_argument("--air", action="store_true", help="wheels in the air: no tip-over stop, no battery stop")
 ap.add_argument("--held", action="store_true")
 ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
+ap.add_argument("--gyro-lp", type=float, default=0.0, help="test (review 2026-11-01 step 0): low-pass the gyro the brain sees, cut-off in Hz (e.g. 6)")
+ap.add_argument("--fast-imu", action="store_true", help="also log the raw IMU about 200 times a second (logs/imu_<time>.csv)")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
 args = ap.parse_args()
 
@@ -30,6 +33,24 @@ TIP_STOP = np.radians(25)       # the drive brain cannot save a lean past about 
 TUCK_HEIGHT, TUCK_S = 0.065, 1.0  # on a fall: legs to 65 mm for 1 s (lands on a bump, not on the head)
 BATTERY_WARN, BATTERY_STOP = 10.8, 10.5      # V, 3S LiPo: 3.6 and 3.5 V per cell
 brain = Brain(args.brain)
+
+
+class LowPass:
+    """2-pole Butterworth low-pass, one per gyro axis, at the decision rate."""
+    def __init__(self, fc, fs):
+        k = np.tan(np.pi * fc / fs); n = 1.0 / (1 + np.sqrt(2) * k + k * k)
+        self.b = np.array([k * k * n, 2 * k * k * n, k * k * n])
+        self.a = np.array([2 * (k * k - 1) * n, (1 - np.sqrt(2) * k + k * k) * n])
+        self.z = None
+    def __call__(self, x):
+        x = np.asarray(x, dtype=float)
+        if self.z is None:                      # start at rest on the first reading (no jump)
+            self.z = np.stack([x * (1 - self.b[0]), x * (self.b[2] - self.a[1])])
+        y = self.b[0] * x + self.z[0]
+        self.z = np.stack([self.b[1] * x - self.a[0] * y + self.z[1], self.b[2] * x - self.a[1] * y])
+        return y
+
+
 ctl = Controller(brain)
 hz = float(brain.c["policy_hz"]); dt = 1.0 / hz
 robot = Robot()
@@ -67,12 +88,14 @@ print("GO. Let go gently." if not (args.air or args.held) else "GO.")
 os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
 log_path = os.path.join(HERE, "logs", time.strftime("run_%Y%m%d_%H%M%S.csv"))
 log = open(log_path, "w")
-log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts\n")
+log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz\n")
 old_tty = termios.tcgetattr(sys.stdin); tty.setcbreak(sys.stdin.fileno())
 speed, turn, height = 0.0, 0.0, float(brain.c["height_normal"])
 reason, volts, t0 = "q pressed", v0, time.perf_counter()
 ctl.reset(robot.read_joints()[0])
 hip_bad = 0
+lp = LowPass(args.gyro_lp, hz) if args.gyro_lp > 0 else None
+fast, t_fast = [], 0.0
 next_t = prev = time.perf_counter()
 try:
     while True:
@@ -99,7 +122,8 @@ try:
         if hip_bad >= 10:
             reason = "hip far from its target (" + ", ".join(f"{np.degrees(a):+.0f}" for a in j[0]) + " deg): servo fault"
             break
-        target, power, action = ctl.step(down, gyro, *j)
+        gyro_b = lp(gyro) if lp is not None else gyro
+        target, power, action = ctl.step(down, gyro_b, *j)
         if args.freeze_hips:
             target = ctl.hip_target = np.asarray(goal, dtype=float).copy()   # hips stay at the stand pose
         robot.write_hips(target)
@@ -122,9 +146,15 @@ try:
             print(f"\rcommand: speed {speed:+.2f} m/s, turn {turn:+.1f} rad/s, height {height * 1000:.0f} mm   ", end="")
         log.write(",".join(f"{x:.5g}" for x in [t_start - t0, (t_start - prev) * 1000, (t_imu - t_start) * 1000,
                   (t_read - t_imu) * 1000, (t_write - t_read) * 1000, *down, *gyro, *j[0], *j[1], *j[2], *action,
-                  *ctl.command, volts or 0]) + "\n")
+                  *ctl.command, volts or 0, *gyro_b]) + "\n")
         prev = t_start
         next_t += dt
+        if args.fast_imu:                         # use the idle part of the step: raw IMU every 5 ms
+            while next_t - time.perf_counter() > 0.0015:
+                if time.perf_counter() - t_fast >= 0.005:
+                    t_fast = time.perf_counter(); g_, a_ = robot.imu.raw()
+                    fast.append([t_fast - t0, *g_, *a_])
+                time.sleep(0.0005)
         sleep = next_t - time.perf_counter()
         if sleep > 0:
             time.sleep(sleep)
@@ -136,4 +166,8 @@ finally:
     robot.stop(hips_off=True)
     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
     log.close()
+    if fast:
+        imu_path = log_path.replace("run_", "imu_")
+        np.savetxt(imu_path, np.array(fast), delimiter=",", header="t,wx,wy,wz,ax,ay,az", comments="", fmt="%.6g")
+        print(f"Fast IMU log: {imu_path} ({len(fast)} readings)")
     print(f"\nSTOPPED: {reason}. Log: {log_path}")
