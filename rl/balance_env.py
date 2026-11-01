@@ -24,8 +24,8 @@ import os
 import sys
 import numpy as np
 import mujoco
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi"))
-from filters import GyroLowPass, DownFilter   # the same filter code runs on the Pi (pi/controller.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "robot"))
+from filters import GyroLowPass, DownFilter   # the same filter code runs on the Pi (robot/controller.py)
 
 MODEL = os.environ.get("MODEL_XML") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim", "roadrunner_mini.xml")
 SIM_DT = float(os.environ.get("SIM_DT", "0.002"))   # s: physics step. 2 ms gives the same report card as 1 ms and trains 1.75x faster (2026-10-30)
@@ -58,7 +58,7 @@ HIP_MAX_SPEED = 4.7       # rad/s: STS3215 top speed at 7.4 V (0.222 s per 60 de
 # Hip target speed limit (sim and Pi): the brain's fast hip moves fed the 11 Hz buzz (hips free stood
 # 3-8 s, hips frozen about 40 s). 1 rad/s still lets it crouch and lean (0.35 rad in 0.35 s).
 HIP_SLEW = float(os.environ.get("HIP_SLEW", "1.0"))   # rad/s
-# Gyro low-pass in the observation (pi/filters.py). The Pi uses GYRO_LP_PI; the sim randomises the cut-off.
+# Gyro low-pass in the observation (robot/filters.py). The Pi uses GYRO_LP_PI; the sim randomises the cut-off.
 GYRO_LP_PI = float(os.environ.get("GYRO_LP", "6.0"))  # Hz; 0 = off (older brains)
 # IMU "down" (review round 7): the sim feeds its accelerometer and gyro through the Pi's complementary filter,
 # so wheel pushes give the same false tilt as on the robot. 0 = old true-gravity observation.

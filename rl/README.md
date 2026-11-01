@@ -40,8 +40,13 @@ Obey these rules. Each rule comes from a mistake that cost training time.
 - `balance_env.py`: the balance game and the realism (servo model, delays, noise, random robots).
 - `drive_env.py`: the driving game (speed, turn and height commands) and the driving report card.
 - `train.py`: trains the policy with PPO. It saves the policy in `runs/<RUN>/latest.zip` and the level in `runs/<RUN>/level.txt`.
-- `wheel_bench.py`: bench test of the wheel servo (PWM mode and speed mode).
-- `diag_017.py`: replays games and records the random settings of each game that fell.
+- `export_brain.py`: makes `../robot/brains/brain_<RUN>.npz` (the brain for the robot) from `runs/<RUN>/latest.zip` and checks it.
+- `sim_test.py`: tests the robot program (`../robot/`) against the simulator.
+- `buzz_report.py`: the buzz numbers of a real run log (`../robot/logs/run_<time>.csv`).
+- `envscan.py`: scans the random settings of the driving game.
+- `bench/`: servo bench tests (`spinup_test.py`, `wheel_bench.py`) and their results.
+- `parked/`: the get-up work (parked 2026-10-30, review NO-GO): `getup_env.py` and the scans.
+- The game uses the same filter, brain and controller code as the robot: `balance_env.py` loads them from `../robot/`.
 
 ## Commands
 - Train a driving policy: `N_ROBOTS=10 TASK=drive RUN=<name> TOTAL_STEPS=20000000 .venv/bin/python train.py`. Ctrl+C stops the training and saves the policy. The same command continues the training and adds TOTAL_STEPS.

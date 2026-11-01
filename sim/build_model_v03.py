@@ -49,7 +49,7 @@ M_WHEEL = float(__import__('os').environ.get('M_WHEEL', '0.0114'))   # wheel 0.0
 WHEEL_OFFSET = 0.0142                    # leg plane to tyre centre (track 138 mm)
 WHEEL_HALF_W = 0.0055
 
-# STS3215 hip servo model MEASURED 2026-10-31 on this robot (rl/pi/hip_bench.py, legs in the air, register
+# STS3215 hip servo model MEASURED 2026-10-31 on this robot (robot/tools/hip_bench.py, legs in the air, register
 # 0x55 = 0 = no acceleration limit, as set_gains.py sets it now). Data: sim/data/hip_bench_20261031_231154_8deg.csv
 # and _231209_20deg.csv (front-left hip). Real: 8 deg step 50 % at 54 ms, 90 % at 76 ms; 20 deg step 50 % at
 # 78 ms, 90 % at 112 ms, top 4.3 rad/s (data sheet 4.7). Fit (sim/fit_hip_servo.py, both step sizes together):

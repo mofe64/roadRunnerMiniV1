@@ -1,7 +1,7 @@
 """Fit the simulator's hip servo model to the real step tests (2026-10-31).
 
   python fit_hip_servo.py
-Real tests (rl/pi/hip_bench.py, front-left hip, register 0x55 = 0 = no acceleration limit): legs in the air,
+Real tests (robot/tools/hip_bench.py, front-left hip, register 0x55 = 0 = no acceleration limit): legs in the air,
 steps of 8 deg (data/hip_bench_20261031_231154_8deg.csv) and 20 deg (data/hip_bench_20261031_231209_20deg.csv)
 around the stand pose, position read every 1 ms. Here the same steps run in the simulator (body held still
 in the air) and the servo values change until both simulated steps look like the average real steps.

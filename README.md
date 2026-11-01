@@ -26,8 +26,9 @@ The design is similar to Upkie, Diablo, TITA and Ascento.
 | `cad/biped_v02/coupon/` | Test coupons. Use them to make sure that your printer gives the correct fits. |
 | `cad/vendor/measurements.yaml` | Dimensions that we measured on the real parts. |
 | `docs/` | Design notes (`DESIGN.md`), parts list (`PARTS.md`) and print instructions (`PRINT.md`). |
-| `sim/` | MuJoCo model of the robot and test scripts. |
-| `rl/` | Reinforcement learning (RL) work area. |
+| `sim/` | MuJoCo model of the robot and test scripts. Old v01 scripts are in `sim/old/`. |
+| `rl/` | Reinforcement learning (RL) training on the Mac: environments, `train.py`, `runs/`. `rl/bench/`: servo bench tests. `rl/parked/`: the parked get-up work. |
+| `robot/` | The program that runs on the robot (Raspberry Pi 5): `run_brain.py`, the trained brains (`robot/brains/`), the gamepad and depth camera code, and the setup tools (`robot/tools/`). Refer to `robot/README.md`. |
 | `renders/` | Images of the design. |
 
 ## STEP file
