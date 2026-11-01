@@ -29,7 +29,7 @@ def export(run):
         # everything the Pi needs to build the same observation as the simulator
         n_obs=env.n_obs, n_act=env.n_act, history=be.HISTORY, mirror=int(be.MIRROR), policy_hz=be.POLICY_HZ,
         wheel_r=be.WHEEL_R, hip_range=be.HIP_RANGE, hip_max_speed=min(be.HIP_MAX_SPEED, be.HIP_SLEW),
-        gyro_lp=be.GYRO_LP_PI, wheel_posdiff=int(be.WHEEL_POSDIFF),
+        gyro_lp=be.GYRO_LP_PI, imu_tau=be.IMU_TAU_PI, wheel_posdiff=int(be.WHEEL_POSDIFF),
         speed_max=de.SPEED_MAX, reverse_max=de.REVERSE_MAX, turn_max=de.TURN_MAX,
         height_normal=de.HEIGHT_NORMAL, height_range=np.array(de.HEIGHT_RANGE),
         lag_max=de.LAG_MAX, heading_lag_max=de.HEADING_LAG_MAX, leak=de.LEAK, hold_max=de.HOLD_MAX,

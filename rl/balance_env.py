@@ -25,7 +25,7 @@ import sys
 import numpy as np
 import mujoco
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi"))
-from filters import GyroLowPass   # the same filter code runs on the Pi (pi/controller.py)
+from filters import GyroLowPass, DownFilter   # the same filter code runs on the Pi (pi/controller.py)
 
 MODEL = os.environ.get("MODEL_XML") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim", "roadrunner_mini.xml")
 SIM_DT = float(os.environ.get("SIM_DT", "0.002"))   # s: physics step. 2 ms gives the same report card as 1 ms and trains 1.75x faster (2026-10-30)
@@ -60,6 +60,10 @@ HIP_MAX_SPEED = 4.7       # rad/s: STS3215 top speed at 7.4 V (0.222 s per 60 de
 HIP_SLEW = float(os.environ.get("HIP_SLEW", "1.0"))   # rad/s
 # Gyro low-pass in the observation (pi/filters.py). The Pi uses GYRO_LP_PI; the sim randomises the cut-off.
 GYRO_LP_PI = float(os.environ.get("GYRO_LP", "6.0"))  # Hz; 0 = off (older brains)
+# IMU "down" (review round 7): the sim feeds its accelerometer and gyro through the Pi's complementary filter,
+# so wheel pushes give the same false tilt as on the robot. 0 = old true-gravity observation.
+IMU_TAU_PI = float(os.environ.get("IMU_TAU", "1.0"))   # s, the Pi's filter time constant (exported with the brain)
+IMU_TAU_RANGE = (0.3, 1.0)                              # s, random per game in the sim
 GYRO_LP_RANGE = (5.0, 8.0)                            # Hz, random per game (realism on)
 # Wheel speed seen by the brain = position difference over one decision, as on the Pi (robot.read_joints).
 # Before: the instant speed. The two differ at 10 Hz (half a step late, smaller).
@@ -133,6 +137,8 @@ class BalanceEnv:
         self.wheel_q = [self.m.jnt_qposadr[self.m.joint(n).id] for n in WHEELS]
         self.torso = self.m.body("torso").id
         self.gyro = self.m.sensor("gyro").adr[0]
+        self.acc = self.m.sensor("acc").adr[0]
+        self.down_filter = DownFilter(IMU_TAU_PI) if IMU_TAU_PI > 0 else None
 
         self.key = self.m.key("stand").id
         self.stand_hips = self.m.key_qpos[self.key][self.hip_q].copy()
@@ -202,7 +208,7 @@ class BalanceEnv:
         """What the robot senses. Every value here has a real sensor on the robot.
         With realism on, readings have small errors and the IMU can be up to 60 ms late."""
         d = self.d
-        imu = np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]])
+        imu = np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]])
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])        # newest first
         imu = self.imu_history[self.imu_delay]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)   # IMU: which way is down
@@ -219,6 +225,14 @@ class BalanceEnv:
         else:
             self.frames = np.vstack([frame, self.frames[:-1]])   # newest first
         return self.frames.ravel().astype(np.float32)
+
+    def sense_down(self):
+        """The IMU "down" vector, as the Pi computes it: accelerometer + gyro through the complementary filter
+        (filters.DownFilter), updated once per decision. With IMU_TAU=0: the true gravity (older brains)."""
+        if self.down_filter is None:
+            return self.true_gravity()
+        d = self.d
+        return self.down_filter.update(d.sensordata[self.gyro:self.gyro + 3], d.sensordata[self.acc:self.acc + 3] / 9.81, 1.0 / POLICY_HZ)
 
     def sense_gyro(self, gyro):
         """The gyro the brain sees: delayed and noisy (in observe), then the low-pass, as on the Pi."""
@@ -310,6 +324,8 @@ class BalanceEnv:
             zeta = np.full(4, 0.15) + r(HIP_SPRING_ZETA[0] - 0.15, HIP_SPRING_ZETA[1] - 0.15, 4)
             m.jnt_stiffness[self.hip_bl] = k
             m.dof_damping[self.hip_bl_dof] = 2 * zeta * np.sqrt(k * 0.025 / 4)
+        if self.down_filter is not None:                        # IMU filter time constant per game
+            self.down_filter = DownFilter(IMU_TAU_PI if s == 0 else rng.uniform(*IMU_TAU_RANGE))
         if self.gyro_lp is not None:                            # gyro filter cut-off per game
             self.gyro_lp = GyroLowPass(GYRO_LP_PI if s == 0 else rng.uniform(*GYRO_LP_RANGE), POLICY_HZ)
         m.jnt_range[self.wheel_bl] = nom["jnt_range"][self.wheel_bl] * f(0.5, 2.0)   # slop +/-0.25..1 deg
@@ -345,7 +361,12 @@ class BalanceEnv:
         self.steps = 0
         self.last_action = np.zeros(self.n_act)
         self.action_history = np.zeros((int(ACT_DELAY_MS[1] / 1000 * POLICY_HZ) + 2 + HIP_DELAY, 6))
-        self.imu_history = np.tile(np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 1, 1))
+        if self.down_filter is None:
+            self.down_now = self.true_gravity()
+        else:   # on the Pi the filter has settled while the robot was held still: start it at the true "down"
+            self.down_filter.down = self.true_gravity()
+            self.down_now = self.down_filter.down.copy()
+        self.imu_history = np.tile(np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 1, 1))
         self.hip_target = d.qpos[self.hip_q].copy()
         if self.gyro_lp is not None:
             self.gyro_lp.reset()
@@ -372,6 +393,7 @@ class BalanceEnv:
             self.d.ctrl[:] = self.old_ctrl if i < self.old_substeps else new_ctrl
             mujoco.mj_step(self.m, self.d)
         self.d.xfrc_applied[self.torso, :] = 0
+        self.down_now = self.sense_down()
         reward, tilt = self.score(action)
         self.last_action = np.clip(action, -1, 1)
         self.steps += 1

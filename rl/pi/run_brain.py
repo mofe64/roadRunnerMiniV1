@@ -26,6 +26,7 @@ ap.add_argument("--held", action="store_true")
 ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
 ap.add_argument("--gyro-lp", type=float, default=0.0, help="test (review 2026-11-01 step 0): low-pass the gyro the brain sees, cut-off in Hz (e.g. 6)")
 ap.add_argument("--fast-imu", action="store_true", help="also log the raw IMU about 200 times a second (logs/imu_<time>.csv)")
+ap.add_argument("--imu-tau", type=float, default=0.0, help="test (review round 7): IMU filter time constant in s (default: the brain's, else 0.5)")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
 args = ap.parse_args()
 
@@ -56,6 +57,11 @@ class LowPass:
 ctl = Controller(brain)
 hz = float(brain.c["policy_hz"]); dt = 1.0 / hz
 robot = Robot()
+if float(brain.c.get("imu_tau", 0)) > 0:      # brains from drive_028 on were trained with the Pi IMU filter at this time constant
+    robot.imu.tau = float(brain.c["imu_tau"])
+if args.imu_tau > 0:
+    robot.imu.tau = args.imu_tau
+print(f"IMU filter time constant {robot.imu.tau:.1f} s")
 robot.prepare()
 v0 = robot.battery()
 print(f"battery {v0:.1f} V")
@@ -90,7 +96,7 @@ print("GO. Let go gently." if not (args.air or args.held) else "GO.")
 os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
 log_path = os.path.join(HERE, "logs", time.strftime("run_%Y%m%d_%H%M%S.csv"))
 log = open(log_path, "w")
-log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz\n")
+log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz,ax,ay,az\n")
 old_tty = termios.tcgetattr(sys.stdin); tty.setcbreak(sys.stdin.fileno())
 speed, turn, height = 0.0, 0.0, float(brain.c["height_normal"])
 reason, volts, t0 = "q pressed", v0, time.perf_counter()
@@ -148,7 +154,7 @@ try:
             print(f"\rcommand: speed {speed:+.2f} m/s, turn {turn:+.1f} rad/s, height {height * 1000:.0f} mm   ", end="")
         log.write(",".join(f"{x:.5g}" for x in [t_start - t0, (t_start - prev) * 1000, (t_imu - t_start) * 1000,
                   (t_read - t_imu) * 1000, (t_write - t_read) * 1000, *down, *gyro, *j[0], *j[1], *j[2], *action,
-                  *ctl.command, volts or 0, *gyro_b]) + "\n")
+                  *ctl.command, volts or 0, *gyro_b, *robot.imu.last_acc]) + "\n")
         prev = t_start
         next_t += dt
         if args.fast_imu:                         # use the idle part of the step: raw IMU every 5 ms

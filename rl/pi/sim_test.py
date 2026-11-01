@@ -27,7 +27,7 @@ def sensors(env):
     prev = getattr(env, "pi_wheel_prev", None)
     wheel_v = np.zeros(2) if prev is None or env.steps == 0 else (q - prev) * 50.0
     env.pi_wheel_prev = q
-    return (env.true_gravity(), d.sensordata[env.gyro:env.gyro + 3].copy(), d.qpos[env.hip_q].copy(),
+    return (env.down_now.copy(), d.sensordata[env.gyro:env.gyro + 3].copy(), d.qpos[env.hip_q].copy(),
             d.qvel[env.hip_v].copy(), wheel_v)
 
 

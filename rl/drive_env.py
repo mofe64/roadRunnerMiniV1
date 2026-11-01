@@ -109,7 +109,7 @@ class DriveEnv(BalanceEnv):
 
     def observe(self):
         d = self.d
-        imu = np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]])
+        imu = np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]])   # IMU down through the Pi filter
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])
         imu = self.imu_history[self.imu_delay]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)

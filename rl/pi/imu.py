@@ -28,7 +28,9 @@ class IMU:
         self.axes = np.asarray(axes, dtype=float)          # body = axes @ sensor
         self.tau = tau
         self.gyro_zero = np.zeros(3)
-        self.down = None
+        from filters import DownFilter
+        self.filter = DownFilter(tau)
+        self.last_acc = np.zeros(3)
 
     def raw(self):
         """(gyro rad/s, accel g), in the body frame, gyro zero removed."""
@@ -50,14 +52,9 @@ class IMU:
         return self.gyro_zero, g.std(axis=0)
 
     def update(self, dt):
-        """Read once and update the filter. Returns (down unit vector in the body frame, gyro rad/s)."""
+        """Read once and update the filter. Returns (down unit vector in the body frame, gyro rad/s).
+        The filter is filters.DownFilter, the same code the simulator uses."""
         gyro, acc = self.raw()
-        meas = -acc / (np.linalg.norm(acc) + 1e-9)        # at rest the accelerometer reads "up"
-        if self.down is None:
-            self.down = meas
-        else:
-            pred = self.down - dt * np.cross(gyro, self.down)   # the body turned, so "down" turns the other way
-            a = dt / self.tau
-            self.down = (1 - a) * pred + a * meas
-            self.down /= np.linalg.norm(self.down)
-        return self.down.copy(), gyro
+        self.last_acc = acc            # raw accelerometer (g, body frame), for the log
+        self.filter.tau = self.tau
+        return self.filter.update(gyro, acc, dt), gyro
