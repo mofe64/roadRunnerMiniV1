@@ -207,7 +207,7 @@ def main():
                         save_png(os.path.join(HERE, "logs", "watch_depth.png"), d)
                         np.save(os.path.join(HERE, "logs", "watch_depth.npy"), d)
                 bar = "#" * int(min(r["ahead"], 1.5) * 20)
-                zone = "STOP" if r["ahead"] < 0.30 else "SLOW" if r["ahead"] < 0.60 else "go  "
+                zone = "STOP" if r["ahead"] < 0.20 else "SLOW" if r["ahead"] < 0.40 else "go  "
                 print(f"\r{zone} ahead {r['ahead'] * 100:4.0f} cm  left {r['left'] * 100:4.0f}  "
                       f"right {r['right'] * 100:4.0f}  {bar:<30}", end="", flush=True)
         except KeyboardInterrupt:

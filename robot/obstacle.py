@@ -101,7 +101,7 @@ class DepthGuard:
     Reverse and turn are never limited. The limit goes DOWN at once and UP only after it stayed higher
     for `up_s` s (the depth noise must not make the command jump: each new command restarts the brain's
     lag signals). Speeds snap to `step` (0.05 m/s = one w key press) for the same reason."""
-    def __init__(self, speed_max, slow=0.60, stop=0.30, stale=0.3, step=0.05, up_s=0.5, port=DEPTH_PORT):
+    def __init__(self, speed_max, slow=0.40, stop=0.20, stale=0.3, step=0.05, up_s=0.5, port=DEPTH_PORT):
         import socket
         self.speed_max, self.slow, self.stop, self.stale, self.step, self.up_s = speed_max, slow, stop, stale, step, up_s
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -164,7 +164,7 @@ class Explorer:
       No camera data: stand still (the DepthGuard also blocks forward driving).
     The DepthGuard limit still applies on top. Speeds are pad/key steps (0.05 m/s, 0.25 rad/s)."""
     FWD, TURN = 0.10, 0.50            # m/s, rad/s (0.5 rad/s on the spot: it fell once on 2026-11-01, watch it)
-    TURN_AT, CLEAR_AT = 0.60, 1.00    # m from the nose
+    TURN_AT, CLEAR_AT = 0.35, 0.60    # m from the nose (indoor: Mofe 2026-11-01)
     MIN_TURN_S, MAX_TURN_S = 1.0, 12.0
 
     def __init__(self):
@@ -326,7 +326,7 @@ if __name__ == "__main__":
               f"{'refused' if fl is None else f'{fl[0] * 1000:.0f} mm, {np.degrees(fl[1]):.1f} deg'}")
         fails += fl is None or abs(fl[0] - cam_h) > 0.005 or abs(np.degrees(fl[1]) - tdeg) > 1.5
     # DepthGuard: starts at 0, limit steps down at once, up only after 0.5 s, 0 when stale
-    g = DepthGuard(0.15, port=0)
+    g = DepthGuard(0.15, slow=0.60, stop=0.30, port=0)   # test numbers (logic test)
     seq = [(0.0, 1.0, 0.0), (0.6, 0.50, 0.10), (0.7, 0.40, 0.05), (0.8, 0.29, 0.0), (0.9, 1.0, 0.0),
            (1.2, 1.0, 0.0), (1.45, 1.0, 0.15), (2.0, None, 0.0)]
     for t, ahead, want in seq:
@@ -338,6 +338,7 @@ if __name__ == "__main__":
     # Explorer: forward, obstacle -> turn to the open side, clear -> forward; no data -> still
     class G: pass
     g, ex = G(), Explorer()
+    ex.TURN_AT, ex.CLEAR_AT = 0.60, 1.00                 # test numbers (logic test)
     ex.start(0.0)
     steps = [(0.0, 2.0, 1.0, 0.5, True, (0.10, 0.0)), (1.0, 0.5, 0.4, 1.2, True, (0.0, -0.5)),
              (1.5, 1.5, 0.4, 1.2, True, (0.0, -0.5)), (2.2, 1.5, 0.4, 1.2, True, (0.10, 0.0)),
