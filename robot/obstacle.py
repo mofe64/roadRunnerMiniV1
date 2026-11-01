@@ -109,6 +109,7 @@ class DepthGuard:
         self.sock.setblocking(False)
         self.pose = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ahead, self.left, self.right = None, None, None
+        self.recent, self.ahead_raw = [], None   # one bad depth frame (2026-11-01 run: 3 m -> 0.11 m for 1 frame) is ignored
         self.t_msg, self.limit, self.t_higher = -1e9, 0.0, None
         self.fresh = False
 
@@ -130,7 +131,9 @@ class DepthGuard:
                 break
             except (ValueError, OSError):
                 continue
-            self.ahead, self.t_msg = float(msg["ahead"]), now
+            self.recent = (self.recent + [float(msg["ahead"])])[-3:]
+            self.ahead, self.t_msg = float(np.median(self.recent)), now    # median of the last 3 frames
+            self.ahead_raw = self.recent[-1]
             self.left, self.right = float(msg.get("left", 0.0)), float(msg.get("right", 0.0))
         self.fresh = now - self.t_msg < self.stale
         want = self.raw_limit(self.ahead if self.fresh else None)
