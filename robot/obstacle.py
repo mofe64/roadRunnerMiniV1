@@ -31,6 +31,9 @@ HALF_WIDTH = 0.15     # corridor half width: robot about 0.18 m wide + 6 cm each
 MAX_RANGE = 3.0       # m, ignore points farther than this (stereo noise grows with distance^2)
 MIN_POINTS = 15       # an obstacle needs this many points (after the 4x decimation): rejects speckle
 STEP = 4              # use every 4th pixel in x and y (640x400 -> 160x100)
+MIN_Z = 0.22          # m from the lens: nearer depth is at the stereo limit (extended disparity ~0.20 m) and is
+                      # mostly false (2026-11-01 explore run: one-frame "obstacles" at 10-11 cm from the nose)
+NEAR_SHARE = 0.25     # but if this share of the corridor pixels is nearer than MIN_Z, a real thing is very close
 
 
 def camera_pose(leg_height, head_pitch=0.0, body_pitch=0.0):
@@ -53,7 +56,8 @@ class Obstacles:
     def points(self, depth_mm, cam_h, tilt):
         """Depth image (uint16 mm) -> F, L, H in the level frame (only valid pixels)."""
         z = depth_mm[::STEP, ::STEP].astype(np.float32) * 0.001
-        ok = (z > 0.05) & (z < MAX_RANGE)
+        self.near = (z > 0.05) & (z <= MIN_Z)            # grid: too near to trust one by one
+        ok = (z > MIN_Z) & (z < MAX_RANGE)
         self.ok = ok                                    # grid of the used pixels (for the picture in depth_cam)
         z, x, y = z[ok], self.rx[ok] * z[ok], self.ry[ok] * z[ok]
         c, s = np.cos(tilt), np.sin(tilt)
@@ -87,6 +91,12 @@ class Obstacles:
                 out[name] = MAX_RANGE
             else:
                 out[name] = max(0.0, float(np.partition(r, MIN_POINTS - 1)[MIN_POINTS - 1]) - NOSE_X)
+        # Very close thing: many corridor pixels nearer than MIN_Z (the bottom-centre of the picture)
+        hh, ww = self.near.shape
+        box = self.near[hh // 2:, ww // 3: ww - ww // 3]
+        out["near_share"] = float(box.mean()) if box.size else 0.0
+        if out["near_share"] > NEAR_SHARE:
+            out["ahead"] = 0.0
         return out
 
 
