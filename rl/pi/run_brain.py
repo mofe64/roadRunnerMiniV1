@@ -33,6 +33,8 @@ TIP_STOP = np.radians(25)       # the drive brain cannot save a lean past about 
 TUCK_HEIGHT, TUCK_S = 0.065, 1.0  # on a fall: legs to 65 mm for 1 s (lands on a bump, not on the head)
 BATTERY_WARN, BATTERY_STOP = 10.8, 10.5      # V, 3S LiPo: 3.6 and 3.5 V per cell
 brain = Brain(args.brain)
+if args.gyro_lp > 0 and float(brain.c.get("gyro_lp", 0)) > 0:
+    raise SystemExit("This brain already low-passes the gyro (drive_022 and later): do not use --gyro-lp.")
 
 
 class LowPass:

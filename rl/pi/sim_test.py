@@ -3,6 +3,8 @@
 1. Same observation: the Pi controller and the simulator build the same 75 numbers at every step.
 2. Closed loop: the Pi controller (not the training code) drives the simulated robot through the
    report card commands, with full realism, and must stay up.
+3. Frozen hips (review 2026-11-01): hips held at the stand pose, the brain drives the wheels only, 10 s,
+   like the real test T2. Must stay up and stay calm (gyro 9-13 Hz share < 30 %, wheel sign flips < 5/s).
 Run in rl/:  RUN=drive_020 .venv/bin/python pi/sim_test.py   (needs pi/brain_<RUN>.npz)
 """
 import os, sys
@@ -19,9 +21,54 @@ brain = Brain(os.path.join(HERE, f"brain_{RUN}.npz"))
 
 
 def sensors(env):
+    """What the Pi reads. Wheel speed = position difference over one decision, as robot.read_joints does."""
     d = env.d
+    q = d.qpos[env.wheel_q].copy()
+    prev = getattr(env, "pi_wheel_prev", None)
+    wheel_v = np.zeros(2) if prev is None or env.steps == 0 else (q - prev) * 50.0
+    env.pi_wheel_prev = q
     return (env.true_gravity(), d.sensordata[env.gyro:env.gyro + 3].copy(), d.qpos[env.hip_q].copy(),
-            d.qvel[env.hip_v].copy(), d.qvel[env.wheel_v].copy())
+            d.qvel[env.hip_v].copy(), wheel_v)
+
+
+def buzz(gyro_y, wheel_a):
+    """Share of the gyro power at 9-13 Hz (after 1 s) and wheel action sign flips per second."""
+    g = np.asarray(gyro_y[50:]) - np.mean(gyro_y[50:])
+    if len(g) < 100:
+        return float("nan"), float("nan")
+    P = np.abs(np.fft.rfft(g * np.hanning(len(g)))) ** 2; f = np.fft.rfftfreq(len(g), 0.02)
+    share = P[(f >= 9) & (f <= 13)].sum() / max(P[f > 0.5].sum(), 1e-12)
+    a = np.asarray(wheel_a)
+    return float(share), float((np.diff(np.sign(a)) != 0).sum() / (len(a) / 50.0))
+
+
+def frozen(games=10):
+    env = DriveEnv(seed=21, shoves=False, realism=True)
+    up, shares, flips = 0, [], []
+    for g in range(games):
+        env.reset(pitch=env.rng.uniform(-0.035, 0.035))
+        env.command = np.array([0.0, 0.0, 0.12]); env.next_command = 10 ** 9
+        env.stand_hips = brain.stand_hips(0.12)
+        ctl = Controller(brain); ctl.set_command(0.0, 0.0, 0.12); ctl.reset(env.d.qpos[env.hip_q])
+        G, A = [], []
+        while True:
+            gr, gy, hq, hv, wv = sensors(env)
+            G.append(gy[1])
+            gr = gr + env.gravity_bias + env.noise("gravity", 3); gy = gy + env.noise("gyro", 3)
+            hq = hq + env.hip_offset + env.noise("hip_pos", 4); hv = hv + env.noise("hip_vel", 4)
+            wv = wv + env.noise("wheel_vel", 2)
+            target, pwm, a = ctl.step(gr, gy, hq, hv, wv)
+            A.append(float(np.mean(pwm)))
+            act = np.concatenate([np.zeros(2 if brain.c["mirror"] else 4), pwm])   # hips stay at the stand pose
+            _, _, fell, timeup, _ = env.step(np.clip(act, -1, 1))
+            if fell or timeup:
+                up += not fell; break
+        sh, fl = buzz(G, A); shares.append(sh); flips.append(fl)
+    sh, fl = np.nanmean(shares), np.nanmean(flips)
+    ok = up == games and sh < 0.3 and fl < 5
+    print(f"3. frozen hips, standing 120 mm: stayed up {up}/{games}, gyro 9-13 Hz share {100 * sh:.0f} % (< 30), "
+          f"wheel flips {fl:.1f}/s (< 5)")
+    return ok
 
 
 def parity(games=5):
@@ -74,5 +121,5 @@ def closed_loop(games=10):
 
 
 if __name__ == "__main__":
-    a = parity(); b = closed_loop()
-    print("PI PROGRAM SIM TEST:", "PASS" if a and b else "FAIL")
+    a = parity(); b = closed_loop(); c = frozen()
+    print("PI PROGRAM SIM TEST:", "PASS" if a and b and c else "FAIL")

@@ -7,6 +7,7 @@ Units are the simulator's: hip angles in rad in the simulator's joint frame (0 =
 down, + = swings back), wheel speeds in rad/s (+ = rolling forward), body frame X forward, Y left, Z up.
 """
 import numpy as np
+from filters import GyroLowPass
 
 
 class Controller:
@@ -21,6 +22,9 @@ class Controller:
         self.hold_max = float(c["hold_max"]) if "hold_max" in c else None   # brains before drive_021 have no hold odometer
         self.hold = 0.0
         self.stand = brain.stand_hips(self.command[2])
+        # drive_022 and later: the gyro is low-passed before the brain sees it, as in the simulator
+        lp = float(c["gyro_lp"]) if "gyro_lp" in c else 0.0
+        self.gyro_lp = GyroLowPass(lp, self.hz) if lp > 0 else None
 
     def set_command(self, speed, turn, height):
         """A new joystick command, clipped to what the brain was trained on. A new command starts a new
@@ -39,10 +43,14 @@ class Controller:
         self.lag = self.heading_lag = self.hold = 0.0
         self.last_action = np.zeros(self.n_act)
         self.hip_target = np.asarray(hip_q, dtype=float).copy()
+        if self.gyro_lp is not None:
+            self.gyro_lp.reset()
 
     def observe(self, gravity, gyro, hip_q, hip_v, wheel_v):
         c = self.c
         gyro, wheel_v = np.asarray(gyro, float), np.asarray(wheel_v, float)
+        if self.gyro_lp is not None:
+            gyro = self.gyro_lp(gyro)
         if self.steps > 0:
             self.lag = float(np.clip(float(c["leak"]) * self.lag + (self.command[0] - float(c["wheel_r"]) * np.mean(wheel_v)) / self.hz,
                                      -float(c["lag_max"]), float(c["lag_max"])))

@@ -37,6 +37,7 @@ LEAK = 0.99
 HOLD_MAX = 1.0            # m: clipped, as the odometer in balance_env
 HOLD_W = float(os.environ.get("HOLD_W", "1.0"))     # score: -HOLD_W x (m off)^2 while holding
 HIP_W = float(os.environ.get("HIP_W", "0.1"))       # score: -HIP_W x mean(hip action^2): do not live at the hip limit
+SMOOTH_W = float(os.environ.get("SMOOTH_W", "0.2"))  # score: -SMOOTH_W x sum(action change^2); was 0.05 (drive_021 buzzed on the robot)
 # Experiments: DRIVE_PARTS=speed trains speed commands only (no turns, no height changes)
 CARD_GAMES = int(os.environ.get("CARD_GAMES", "50"))   # games per report card line (6 was too few: one fall = 17 %)
 DRIVE_PARTS = os.environ.get("DRIVE_PARTS", "speed,turn,height").split(",")
@@ -106,10 +107,10 @@ class DriveEnv(BalanceEnv):
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])
         imu = self.imu_history[self.imu_delay]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)
-        gyro = imu[3:] + self.noise("gyro", 3)
+        gyro = self.sense_gyro(imu[3:] + self.noise("gyro", 3))
         hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)
         hip_vel = d.qvel[self.hip_v] + self.noise("hip_vel", 4)
-        wheel_vel = d.qvel[self.wheel_v] + self.noise("wheel_vel", 2)
+        wheel_vel = self.sense_wheels() + self.noise("wheel_vel", 2)
         # "Behind schedule": how far the robot is behind (or ahead of) where the speed command would put it,
         # from the wheel speeds the servos report. Without it the brain only sees the speed NOW, so a robot
         # with more friction or a weaker motor than average settles at a lower speed (like a P controller
@@ -148,7 +149,7 @@ class DriveEnv(BalanceEnv):
         tall = 0.5 * np.exp(-(self.height() - self.command[2]) ** 2 / 0.0001)   # points for the right height (+/-1 cm)
         upright = -2.0 * tilt ** 2
         wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
-        smooth = -0.05 * np.sum((action - self.last_action) ** 2)
+        smooth = -SMOOTH_W * np.sum((action - self.last_action) ** 2)
         hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
         hold = -HOLD_W * self.hold ** 2 if self.command[0] == 0.0 else 0.0
         # keep both legs the same length (Mofe saw it stand with one leg higher): 1 cm difference costs 0.3
@@ -175,12 +176,39 @@ class DriveEnv(BalanceEnv):
 # the last lines are the hard corners (several commands at their limits together).
 CARD = [(0.0, 0.0, 0.12, 60), (0.1, 0.0, 0.12, 10), (0.15, 0.0, 0.12, 10), (-0.10, 0.0, 0.12, 10),
         (0.0, 1.0, 0.12, 10), (0.1, 0.8, 0.12, 10), (0.0, 0.0, 0.08, 60), (0.0, 0.0, 0.135, 60), (0.1, 0.0, 0.09, 10),
-        (0.15, 1.0, 0.12, 10), (-0.10, 1.0, 0.12, 10), (0.15, 0.0, 0.08, 10), (0.0, 1.5, 0.135, 10)]
+        (0.15, 1.0, 0.12, 10), (-0.10, 1.0, 0.12, 10), (0.15, 0.0, 0.08, 10), (0.0, 1.5, 0.135, 10),
+        (0.0, 0.0, 0.12, 60, "hard"), (0.0, 0.0, 0.12, 20, "frozen")]
+# "hard" line (review 2026-11-01): the robot most like the real one that buzzed: the softest hip flex
+# (10 Nm/rad, damping ratio 0.05), the lightest wheel rotor (x0.15 of 0.004), body inertia x0.5.
+# "frozen" line: hips held at the stand pose, wheels only (like the real test T2). The ratio d(wy)/d(wheel)
+# means something only with the hips still (review round 3), so it is printed on this line only.
+
+
+def hard_plant(env):
+    m = env.m
+    m.jnt_stiffness[env.hip_bl] = 10.0
+    m.dof_damping[env.hip_bl_dof] = 2 * 0.05 * np.sqrt(10.0 * 0.025 / 4)
+    m.dof_armature[env.wheel_v] = 0.004 * 0.15
+    m.body_inertia[env.torso] = env.nominal["inertia"][env.torso] * 0.5
+
+
+def buzz_numbers(G, A, DY, DW):
+    """Gyro rms, gyro 9-13 Hz share, wheel sign flips per second, d(gyro)/d(wheel speed): the same four
+    numbers are computed from the real robot's CSV, so sim and robot are compared the same way."""
+    g = np.asarray(G) - np.mean(G)
+    P = np.abs(np.fft.rfft(g * np.hanning(len(g)))) ** 2; f = np.fft.rfftfreq(len(g), 1.0 / POLICY_HZ)
+    share = P[(f >= 9) & (f <= 13)].sum() / max(P[f > 0.5].sum(), 1e-12)
+    flips = (np.diff(np.sign(A)) != 0).sum() / (len(A) / POLICY_HZ)
+    ratio = np.polyfit(DW, DY, 1)[0] if len(DW) > 10 else float("nan")
+    return float(np.std(G)), float(share), float(flips), float(ratio)
 
 
 def card_line(job):
     """Play CARD_GAMES games of one report card line; return the printed line."""
-    path, (v, w, h, seconds), seed = job
+    path, line, seed = job
+    v, w, h, seconds = line[:4]
+    hard = len(line) > 4 and "hard" in line[4]
+    freeze = len(line) > 4 and "frozen" in line[4]
     from stable_baselines3 import PPO
     model = PPO.load(path, device="cpu")
     env = DriveEnv(seed=seed, shoves=False)
@@ -188,28 +216,48 @@ def card_line(job):
     hs, poses = env.pose_table
     up, speeds, turns, heights, uneven = 0, [], [], [], []
     creep, at_limit, wheel_peak, hip_mag = [], [], [], []   # standing quality (2026-10-31: the real robot crept forward and fell)
+    buzz = []                                               # gyro rms, 9-13 Hz share, flips, ratio per game (2026-11-01)
     for _ in range(CARD_GAMES):
         obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
+        if hard:
+            hard_plant(env)
         env.command = np.array([v, w, h]); env.next_command = 10 ** 9
         env.stand_hips = np.array([np.interp(h, hs, poses[:, i]) for i in range(4)])
         obs = env.observe()
         x0, far, peak, lim, n = float(np.mean(env.d.qpos[env.wheel_q])), 0.0, 0.0, 0, 0
+        G, A, W = [], [], []
         while True:
             action = model.predict(obs, deterministic=True)[0]
+            if freeze:
+                action = np.concatenate([np.zeros(len(action) - 2), action[-2:]])   # hips stay at the stand pose
             obs, r, fell, timeup, info = env.step(action)
             far = max(far, abs(float(np.mean(env.d.qpos[env.wheel_q])) - x0) * WHEEL_R)   # m from the start
             peak = max(peak, float(np.max(np.abs(env.d.qvel[env.wheel_v]))))
             lim += int(np.any(np.abs(action[:-2]) > 0.9)); n += 1; hip_mag.append(float(np.mean(np.abs(action[:-2]))))
+            G.append(float(env.d.sensordata[env.gyro + 1])); A.append(float(np.mean(action[-2:])))
+            W.append(float(np.mean(env.d.qpos[env.wheel_q])) * POLICY_HZ)
             if env.steps > 4 * POLICY_HZ:
                 f, t = env.body_speed(); speeds.append(f); turns.append(t); heights.append(env.height())
                 legs = env.leg_lengths(); uneven.append(abs(legs[0] - legs[1]))
             if fell or timeup:
                 up += not fell
                 creep.append(far); wheel_peak.append(peak); at_limit.append(lim / max(n, 1))
+                if len(G) > 100:
+                    Wv = np.diff(W)                       # wheel speed by position difference, as on the Pi
+                    buzz.append(buzz_numbers(G[51:], A[51:], np.diff(G[51:]), np.diff(Wv[50:])))
                 break
     quality = (f", mean |hip| {np.mean(hip_mag):.2f}, hips at limit {100 * np.mean(at_limit):.0f} %, wheel peak {np.max(wheel_peak):.1f} rad/s"
                + (f", creep max {np.max(creep):.2f} m" if v == 0.0 and w == 0.0 else ""))
-    return (f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
+    if buzz:
+        b = np.array(buzz)
+        g_rms, share, flips, ratio = np.nanmean(b[:, 0]), np.nanmean(b[:, 1]), np.nanmean(b[:, 2]), np.nanmedian(b[:, 3])
+        quality += (f", gyro rms {g_rms:.2f}, 9-13 Hz {100 * share:.0f} %, flips {flips:.1f}/s"
+                    + (f", d(wy)/d(wheel) {ratio:+.2f} (real -0.21..-0.25)" if freeze else ""))
+        if v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01)
+            ok = (up == CARD_GAMES and g_rms < 0.3 and share < 0.3 and flips < 5 and np.mean(hip_mag) < 0.5
+                  and np.max(creep) < 0.5)
+            quality += "  MARKS " + ("PASS" if ok else "FAIL")
+    return (("  [HARD PLANT]" if hard else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
             f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
             f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm" + quality)
 

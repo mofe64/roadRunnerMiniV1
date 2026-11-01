@@ -21,8 +21,11 @@ Watch it in the MuJoCo window (5 games, 4x slow motion; on a Mac use mjpython):
   .venv/bin/mjpython balance_env.py --watch --random
 """
 import os
+import sys
 import numpy as np
 import mujoco
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi"))
+from filters import GyroLowPass   # the same filter code runs on the Pi (pi/controller.py)
 
 MODEL = os.environ.get("MODEL_XML") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim", "roadrunner_mini.xml")
 SIM_DT = float(os.environ.get("SIM_DT", "0.002"))   # s: physics step. 2 ms gives the same report card as 1 ms and trains 1.75x faster (2026-10-30)
@@ -51,6 +54,31 @@ ACT_DELAY_MS = tuple(float(x) for x in os.environ.get("ACT_DELAY_MS", "10,30").s
 # ACT_DELAY_MS. Kept as a knob for tests (with the old 0x55 = 254 acceleration limit it would have been 1).
 HIP_DELAY = int(os.environ.get("HIP_DELAY", "0"))   # decisions
 HIP_MAX_SPEED = 4.7       # rad/s: STS3215 top speed at 7.4 V (0.222 s per 60 deg)
+# --- drive_022 changes (independent review 2026-11-01, real tests T2 and step 0) ---
+# Hip target speed limit (sim and Pi): the brain's fast hip moves fed the 11 Hz buzz (hips free stood
+# 3-8 s, hips frozen about 40 s). 1 rad/s still lets it crouch and lean (0.35 rad in 0.35 s).
+HIP_SLEW = float(os.environ.get("HIP_SLEW", "1.0"))   # rad/s
+# Gyro low-pass in the observation (pi/filters.py). The Pi uses GYRO_LP_PI; the sim randomises the cut-off.
+GYRO_LP_PI = float(os.environ.get("GYRO_LP", "6.0"))  # Hz; 0 = off (older brains)
+GYRO_LP_RANGE = (5.0, 8.0)                            # Hz, random per game (realism on)
+# Wheel speed seen by the brain = position difference over one decision, as on the Pi (robot.read_joints).
+# Before: the instant speed. The two differ at 10 Hz (half a step late, smaller).
+WHEEL_POSDIFF = os.environ.get("WHEEL_POSDIFF", "1") == "1"
+# Wheel motor rotor inertia (reflected, the "armature" 0.004 in the model) x this factor. With the SAME
+# measure as the Pi (position difference) the real floor fit is 310 x action - 32 x speed; the model at
+# 0.004 gives 159 x a - 16 x w, at x0.25 gives 260-280 x a - 26..28 x w (RL thread, 2026-11-01).
+# The in-air spin-up only bounds the time constant (<= 20 ms), so it cannot tell. Randomised 0.6-2x around it.
+WHEEL_ARM_SCALE = float(os.environ.get("WHEEL_ARM_SCALE", "0.25"))
+# Flex between each hip servo and its leg (horn screws in 3.5 mm holes, knee pins, PLA links): a torsional
+# spring-damper in series at each hip, on the "backlash" joint (the old +/-0.5 deg free slop is replaced).
+# The real body rocks on the legs at 10-11 Hz with the encoders still: body inertia about the hips
+# ~0.025 kg m^2 on 4 joints -> ~27 Nm/rad each at 10.5 Hz; the real wheel-to-gyro ratio fits 10-15 better.
+# Not measured directly: randomised wide, 10-40 Nm/rad, damping ratio 0.05-0.3.
+HIP_SPRING_K = float(os.environ.get("HIP_SPRING_K", "20"))      # Nm/rad nominal; 0 = old slop joint
+HIP_SPRING_K_RANGE = (0.5, 2.0)     # x nominal
+HIP_SPRING_ZETA = (0.05, 0.3)
+HIP_SPRING_LIMIT = 0.2              # rad: end stop of the flex joint (never reached in normal games)
+BODY_INERTIA = (0.5, 1.0)           # x the body's own pitch/roll/yaw inertia, random per game
 # Sensor errors (uniform +/-), like a real robot (independent review 2026-10-30). The old values came from
 # Open Duck and were much larger: gravity 0.05, gyro 0.2, hip_pos 0.03, hip_vel 2.5.
 NOISE = dict(gravity=0.005,     # IMU "down" jitter: 0.3 deg per reading
@@ -126,6 +154,18 @@ class BalanceEnv:
                             frictionloss=m.dof_frictionloss.copy(), armature=m.dof_armature.copy(),
                             jnt_range=m.jnt_range.copy(), dynprm=m.actuator_dynprm.copy())
         self.filtered = [a for a in range(m.nu) if m.actuator_dyntype[a] != mujoco.mjtDyn.mjDYN_NONE]
+        # drive_022: hip flex springs, lighter wheel rotor (see the constants at the top)
+        self.hip_bl = [m.joint(n + "_backlash").id for n in HIPS]
+        self.hip_bl_dof = [m.jnt_dofadr[j] for j in self.hip_bl]
+        if HIP_SPRING_K > 0 and "backlash" not in ABLATE:
+            m.jnt_range[self.hip_bl] = [-HIP_SPRING_LIMIT, HIP_SPRING_LIMIT]
+            m.jnt_stiffness[self.hip_bl] = HIP_SPRING_K
+            m.dof_damping[self.hip_bl_dof] = 2 * 0.15 * np.sqrt(HIP_SPRING_K * 0.025 / 4)
+        m.dof_armature[self.wheel_v] *= WHEEL_ARM_SCALE
+        self.nominal.update(armature=m.dof_armature.copy(), jnt_range=m.jnt_range.copy(),
+                            inertia=m.body_inertia.copy(), damping=m.dof_damping.copy())
+        self.gyro_lp = GyroLowPass(GYRO_LP_PI, POLICY_HZ) if GYRO_LP_PI > 0 else None
+        self.wheel_prev = None
 
     def ablate(self, parts):
         """Turn parts of the v3 servo model off (for experiments only)."""
@@ -164,10 +204,10 @@ class BalanceEnv:
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])        # newest first
         imu = self.imu_history[self.imu_delay]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)   # IMU: which way is down
-        gyro = imu[3:] + self.noise("gyro", 3)                         # IMU: how fast the body is turning
+        gyro = self.sense_gyro(imu[3:] + self.noise("gyro", 3))      # IMU: how fast the body is turning (low-passed)
         hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)   # servo position feedback
         hip_vel = d.qvel[self.hip_v] + self.noise("hip_vel", 4)       # servo speed feedback
-        wheel_vel = d.qvel[self.wheel_v] + self.noise("wheel_vel", 2) # wheel servo speed feedback
+        wheel_vel = self.sense_wheels() + self.noise("wheel_vel", 2) # wheel speed from the servo positions
         odo = [np.clip(self.distance(), -1, 1)]           # how far it has rolled from the start (wheel turns, like a car odometer)
         frame = np.concatenate([gravity, gyro, hip_pos, hip_vel * 0.1, wheel_vel * 0.1, odo, self.last_action])
         if HISTORY == 1:
@@ -177,6 +217,19 @@ class BalanceEnv:
         else:
             self.frames = np.vstack([frame, self.frames[:-1]])   # newest first
         return self.frames.ravel().astype(np.float32)
+
+    def sense_gyro(self, gyro):
+        """The gyro the brain sees: delayed and noisy (in observe), then the low-pass, as on the Pi."""
+        return self.gyro_lp(gyro) if self.gyro_lp is not None else gyro
+
+    def sense_wheels(self):
+        """Wheel speeds the brain sees (rad/s): the position difference over one decision, as on the Pi."""
+        if not WHEEL_POSDIFF:
+            return self.d.qvel[self.wheel_v].copy()
+        q = self.d.qpos[self.wheel_q].copy()
+        v = np.zeros(2) if self.wheel_prev is None else (q - self.wheel_prev) * POLICY_HZ
+        self.wheel_prev = q
+        return v
 
     def distance(self):
         """Metres rolled since the start, from the wheel angles (the real servos report their position)."""
@@ -193,7 +246,7 @@ class BalanceEnv:
         a_hip = self.action_history[late + (HIP_DELAY if self.realism and "delay" not in ABLATE else 0)]
         target = self.stand_hips + HIP_RANGE * a_hip[:4] - self.hip_offset      # the servo's own zero is slightly off
         if self.realism and "hipspeed" not in ABLATE:   # the servo cannot move faster than its top speed
-            step = HIP_MAX_SPEED / POLICY_HZ
+            step = min(HIP_MAX_SPEED, HIP_SLEW) / POLICY_HZ
             target = np.clip(target, self.hip_target - step, self.hip_target + step)
         self.hip_target = target
         for i, n in enumerate(HIPS):
@@ -245,7 +298,15 @@ class BalanceEnv:
         # Wheel servo (ST3215-HS) gearbox: not measured, so the ranges are WIDE. A brain that copes
         # with all of them should cope with the real one too, without a bench test.
         m.dof_frictionloss[self.wheel_v] = nom["frictionloss"][self.wheel_v] * f(0.3, 3.0, 2)
-        m.dof_armature[self.wheel_v] = nom["armature"][self.wheel_v] * f(0.7, 1.4, 2)    # measured (spin-up test), so a narrower range
+        m.dof_armature[self.wheel_v] = nom["armature"][self.wheel_v] * f(0.6, 2.0, 2)    # x0.15-0.5 of the old 0.004 (see WHEEL_ARM_SCALE)
+        m.body_inertia[self.torso] = nom["inertia"][self.torso] * np.exp(r(np.log(BODY_INERTIA[0]), np.log(BODY_INERTIA[1])))   # body inertia x0.5-1
+        if HIP_SPRING_K > 0 and "backlash" not in ABLATE:      # hip flex: stiffness and damping per game
+            k = HIP_SPRING_K * f(*HIP_SPRING_K_RANGE, 4)
+            zeta = np.full(4, 0.15) + r(HIP_SPRING_ZETA[0] - 0.15, HIP_SPRING_ZETA[1] - 0.15, 4)
+            m.jnt_stiffness[self.hip_bl] = k
+            m.dof_damping[self.hip_bl_dof] = 2 * zeta * np.sqrt(k * 0.025 / 4)
+        if self.gyro_lp is not None:                            # gyro filter cut-off per game
+            self.gyro_lp = GyroLowPass(GYRO_LP_PI if s == 0 else rng.uniform(*GYRO_LP_RANGE), POLICY_HZ)
         m.jnt_range[self.wheel_bl] = nom["jnt_range"][self.wheel_bl] * f(0.5, 2.0)   # slop +/-0.25..1 deg
         # wheel motor back-EMF slope: the bench test gave 5.76 rad/s at 6.2 V (from position), +/-5 %
         m.actuator_biasprm[self.wheel_act, 2] = nom["bias"][self.wheel_act, 2] * f(0.95, 1.05, 2)
@@ -280,6 +341,9 @@ class BalanceEnv:
         self.action_history = np.zeros((int(ACT_DELAY_MS[1] / 1000 * POLICY_HZ) + 2 + HIP_DELAY, 6))
         self.imu_history = np.tile(np.concatenate([self.true_gravity(), d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 1, 1))
         self.hip_target = d.qpos[self.hip_q].copy()
+        if self.gyro_lp is not None:
+            self.gyro_lp.reset()
+        self.wheel_prev = None
         return self.observe()
 
     def full_action(self, action):
