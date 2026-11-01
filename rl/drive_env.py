@@ -43,6 +43,8 @@ FLIP_BAND = 0.1                                      # wheel action must cross z
 HIP_W = float(os.environ.get("HIP_W", "1.0"))       # score: -HIP_W x mean(hip action^2): stand with centred hips (0.1 was too small: review 2026-11-01 round 4)
 UPRIGHT_W = float(os.environ.get("UPRIGHT_W", "10.0"))   # score: -UPRIGHT_W x tilt^2: stand straight (2 let it lean 7 deg back, round 4)
 SMOOTH_W = float(os.environ.get("SMOOTH_W", "0.2"))  # score: -SMOOTH_W x sum(action change^2); was 0.05 (drive_021 buzzed on the robot)
+WOBBLE_PITCH_W = float(os.environ.get("WOBBLE_PITCH_W", "1.0"))   # score: -W x min(pitch rate^2, WOBBLE_CLIP) (review round 8d; was 0.05)
+WOBBLE_CLIP = float(os.environ.get("WOBBLE_CLIP", "1.0"))         # (rad/s)^2
 # Experiments: DRIVE_PARTS=speed trains speed commands only (no turns, no height changes)
 CARD_GAMES = int(os.environ.get("CARD_GAMES", "50"))   # games per report card line (6 was too few: one fall = 17 %)
 DRIVE_PARTS = os.environ.get("DRIVE_PARTS", "speed,turn,height").split(",")
@@ -154,7 +156,11 @@ class DriveEnv(BalanceEnv):
         steer = 1.0 * np.exp(-(turn - self.command[1]) ** 2 / 0.03) - 0.2 * abs(turn - self.command[1])
         tall = 0.5 * np.exp(-(self.height() - self.command[2]) ** 2 / 0.0001)   # points for the right height (+/-1 cm)
         upright = -UPRIGHT_W * tilt ** 2
-        wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
+        # pitch and roll wobble, from the TRUE gyro (review round 8d, 2026-11-01): the pitch part now charges for the
+        # 3.5 Hz rocking (0.2 rad/s rms costs 0.04 per step); clipped at 1 (rad/s)^2 so that a fast recovery
+        # from a shove never costs more than a fall. drive_026 and older: WOBBLE_PITCH_W=0.05, no clip.
+        wx, wy = self.d.sensordata[self.gyro:self.gyro + 2]
+        wobble = -WOBBLE_PITCH_W * min(wy ** 2, WOBBLE_CLIP) - 0.05 * wx ** 2
         smooth = -SMOOTH_W * np.sum((action - self.last_action) ** 2)
         hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
         hold = -HOLD_W * self.hold ** 2 - HOLD_LIN * max(abs(self.hold) - HOLD_FLAT, 0.0) if self.command[0] == 0.0 else 0.0
@@ -183,17 +189,42 @@ class DriveEnv(BalanceEnv):
 CARD = [(0.0, 0.0, 0.12, 60), (0.1, 0.0, 0.12, 10), (0.15, 0.0, 0.12, 10), (-0.10, 0.0, 0.12, 10),
         (0.0, 1.0, 0.12, 10), (0.1, 0.8, 0.12, 10), (0.0, 0.0, 0.08, 60), (0.0, 0.0, 0.135, 60), (0.1, 0.0, 0.09, 10),
         (0.15, 1.0, 0.12, 10), (-0.10, 1.0, 0.12, 10), (0.15, 0.0, 0.08, 10), (0.0, 1.5, 0.135, 10),
-        (0.0, 0.0, 0.12, 60, "hard"), (0.0, 0.0, 0.12, 20, "frozen")]
+        (0.0, 0.0, 0.12, 60, "hard"), (0.0, 0.0, 0.12, 20, "frozen"),
+        (0.0, 0.0, 0.12, 60, "stress"), (0.1, 0.0, 0.12, 20, "stress"), (0.15, 0.0, 0.12, 20, "stress")]
 # "hard" line (review 2026-11-01): the robot most like the real one that buzzed: the softest hip flex
 # (10 Nm/rad, damping ratio 0.05), the lightest wheel rotor (x0.15 of 0.004), body inertia x0.5.
 # "frozen" line: hips held at the stand pose, wheels only (like the real test T2). The ratio d(wy)/d(wheel)
 # means something only with the hips still (review round 3), so it is printed on this line only.
 
 
+# "stress" lines (review round 8, 2026-11-01): the robot that rocked at 3.5 Hz: full battery (12.6 V), the
+# longest command delay (40 ms) and a small wheel dead band (0.02). At stress, drive_026 gives 0.19-0.24 rad/s
+# (real robot 0.19-0.31) and drive_023 0.08-0.10 (real robot calm, 0.03).
+# Pass: mean 2.5-5 Hz gyro band < 0.10 rad/s, every game < 0.20, no 9-13 Hz buzz (buzzing()).
+# Ordinary driving lines: mean 2.5-5 Hz band < 0.05.
+STRESS_BAND_MEAN, STRESS_BAND_GAME = 0.10, 0.20
+DRIVE_BAND_MEAN = 0.05
+
+
+def stress_plant(env):
+    env.wheel_strength = 1.135
+    env.act_delay = int(round(0.040 / env.m.opt.timestep))
+    env.wheel_deadband = 0.02
+
+
+def rock_band(G, lo=2.5, hi=5.0):
+    """Gyro y band rms (rad/s) between lo and hi Hz: the 3.5 Hz rocking. Same function for the card and the real CSV."""
+    g = np.asarray(G, float) - np.mean(G)
+    F = np.fft.rfft(g); f = np.fft.rfftfreq(len(g), 1.0 / POLICY_HZ)
+    F[(f < lo) | (f > hi)] = 0.0
+    return float(np.std(np.fft.irfft(F, len(g))))
+
+
 def hard_plant(env):
     m = env.m
-    m.jnt_stiffness[env.hip_bl] = 10.0
-    m.dof_damping[env.hip_bl_dof] = 2 * 0.05 * np.sqrt(10.0 * 0.025 / 4)
+    k = float(os.environ.get("HARD_K", "10"))   # Nm/rad: the softest hip flex of the range (review round 8c: 8 with k 8-16)
+    m.jnt_stiffness[env.hip_bl] = k
+    m.dof_damping[env.hip_bl_dof] = 2 * 0.05 * np.sqrt(k * 0.025 / 4)
     m.dof_armature[env.wheel_v] = 0.004 * 0.15
     m.body_inertia[env.torso] = env.nominal["inertia"][env.torso] * 0.5
 
@@ -238,6 +269,7 @@ def card_line(job):
     path, line, seed = job
     v, w, h, seconds = line[:4]
     hard = len(line) > 4 and "hard" in line[4]
+    stress = len(line) > 4 and "stress" in line[4]
     freeze = len(line) > 4 and "frozen" in line[4]
     from stable_baselines3 import PPO
     model = PPO.load(path, device="cpu")
@@ -248,15 +280,18 @@ def card_line(job):
     creep, at_limit, wheel_peak, hip_mag = [], [], [], []   # standing quality (2026-10-31: the real robot crept forward and fell)
     buzz = []                                               # gyro rms, 9-13 Hz share, flips, ratio per game (2026-11-01)
     rock = []                                               # wheel |a|, wheel speed rms, growth per game (review round 6)
+    calm = []                                               # body pitch rms (deg), wheel travel rms (rad), last 5 s (review round 8d)
     for _ in range(CARD_GAMES):
         obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
         if hard:
             hard_plant(env)
+        if stress:
+            stress_plant(env)
         env.command = np.array([v, w, h]); env.next_command = 10 ** 9
         env.stand_hips = np.array([np.interp(h, hs, poses[:, i]) for i in range(4)])
         obs = env.observe()
         x0, far, peak, lim, n = float(np.mean(env.d.qpos[env.wheel_q])), 0.0, 0.0, 0, 0
-        G, A, W = [], [], []
+        G, A, W, PT = [], [], [], []
         while True:
             action = model.predict(obs, deterministic=True)[0]
             if freeze:
@@ -266,6 +301,7 @@ def card_line(job):
             peak = max(peak, float(np.max(np.abs(env.d.qvel[env.wheel_v]))))
             lim += int(np.any(np.abs(action[:-2]) > 0.9)); n += 1; hip_mag.append(float(np.mean(np.abs(action[:-2]))))
             G.append(float(env.d.sensordata[env.gyro + 1])); A.append(float(np.mean(action[-2:])))
+            PT.append(float(np.degrees(np.arcsin(np.clip(env.true_gravity()[0], -1, 1)))))
             W.append(float(np.mean(env.d.qpos[env.wheel_q])) * POLICY_HZ)
             if env.steps > 4 * POLICY_HZ:
                 f, t = env.body_speed(); speeds.append(f); turns.append(t); heights.append(env.height())
@@ -275,23 +311,37 @@ def card_line(job):
                 creep.append(far); wheel_peak.append(peak); at_limit.append(lim / max(n, 1))
                 if len(G) > 100:
                     Wv = np.diff(W)                       # wheel speed by position difference, as on the Pi
-                    buzz.append(buzz_numbers(G[51:], A[51:], np.diff(G[51:]), np.diff(Wv[50:])))
+                    buzz.append(buzz_numbers(G[51:], A[51:], np.diff(G[51:]), np.diff(Wv[50:])) + (rock_band(G[51:]),))
                     rock.append(rocking(A[50:], Wv[50:] * WHEEL_R))
+                    n5 = min(5 * POLICY_HZ, len(PT))
+                    calm.append((float(np.std(PT[-n5:])), float(np.std(np.array(W[-n5:]) / POLICY_HZ))))
                 break
     quality = (f", mean |hip| {np.mean(hip_mag):.2f}, hips at limit {100 * np.mean(at_limit):.0f} %, wheel peak {np.max(wheel_peak):.1f} rad/s"
                + (f", creep max {np.max(creep):.2f} m" if v == 0.0 and w == 0.0 else ""))
     if buzz:
         b = np.array(buzz)
         g_rms, share, flips, ratio = np.nanmean(b[:, 0]), np.nanmean(b[:, 1]), np.nanmean(b[:, 2]), np.nanmedian(b[:, 3])
-        quality += (f", gyro rms {g_rms:.2f}, 9-13 Hz {100 * share:.0f} %, flips {flips:.1f}/s"
+        band = np.nanmean(b[:, 4])
+        quality += (f", gyro rms {g_rms:.2f}, 9-13 Hz {100 * share:.0f} %, 2.5-5 Hz band {band:.3f} (max {np.nanmax(b[:, 4]):.3f}), flips {flips:.1f}/s"
                     + (f", d(wy)/d(wheel) {ratio:+.2f} (real -0.21..-0.25)" if freeze else ""))
-        if v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01, rounds 3-6)
+        if calm:
+            c = np.array(calm)
+            quality += f", pitch rms {np.mean(c[:, 0]):.2f} deg, wheel travel rms {np.mean(c[:, 1]):.2f} rad (last 5 s)"
+            if v == 0.0 and w == 0.0 and not freeze:   # slow hunting check (review round 8d)
+                quality += "  CALM MARK " + ("PASS" if np.mean(c[:, 0]) < 1.0 and np.mean(c[:, 1]) < 0.3 else "FAIL")
+        if stress:   # review round 8: the 3.5 Hz rocking and the 11 Hz buzz, every game
+            ok_s = (up == CARD_GAMES and band < STRESS_BAND_MEAN and np.nanmax(b[:, 4]) < STRESS_BAND_GAME
+                    and not any(buzzing(x[0], x[1]) for x in b))
+            quality += "  STRESS MARKS " + ("PASS" if ok_s else "FAIL")
+        elif v != 0.0 and not hard and not freeze:   # ordinary driving lines: the 3.5 Hz rocking
+            quality += "  3.5 Hz MARK " + ("PASS" if band < DRIVE_BAND_MEAN and not buzzing(g_rms, share) else "FAIL")
+        elif v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01, rounds 3-6)
             k = np.array(rock)
             quality += f", wheel |a| {np.mean(k[:, 0]):.2f}, wheel speed rms {np.mean(k[:, 1]):.3f} m/s, growth {np.max(k[:, 2]):.1f}x"
             ok = (up == CARD_GAMES and g_rms < 0.3 and not buzzing(g_rms, share) and flips < 5 and np.mean(hip_mag) < 0.5
                   and np.max(creep) < 0.5 and np.mean(k[:, 0]) < 0.2 and np.mean(k[:, 1]) < 0.05 and np.max(k[:, 2]) <= 1.2)
             quality += "  MARKS " + ("PASS" if ok else "FAIL")
-    return (("  [HARD PLANT]" if hard else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
+    return (("  [HARD PLANT]" if hard else "") + ("  [STRESS]" if stress else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
             f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
             f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm" + quality)
 
@@ -302,6 +352,11 @@ def test(path):
     The lines run in parallel, one per CPU core. Pass mark: every line stays up CARD_GAMES/CARD_GAMES."""
     from multiprocessing import Pool
     print("DRIVING REPORT CARD for", path, flush=True)
+    import balance_env as be
+    f = DriveEnv(seed=0, shoves=False, realism=False).gyro_lp
+    if f is not None and hasattr(f, "response"):   # README rule 13: the observation filter is part of the plant
+        print("gyro filter (Pi values): " + ", ".join(f"{hz} Hz {g:.2f}@{p:.0f} deg" for hz, (g, p) in
+                                                      [(hz, f.response(hz, POLICY_HZ)) for hz in (1, 2, 3.5, 5, 10.5, 15)]), flush=True)
     with Pool(min(len(CARD), os.cpu_count() or 4)) as pool:
         for line in pool.imap(card_line, [(path, c, 7 + k) for k, c in enumerate(CARD)]):
             print(line, flush=True)

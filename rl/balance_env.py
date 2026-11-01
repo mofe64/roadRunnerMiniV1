@@ -25,7 +25,7 @@ import sys
 import numpy as np
 import mujoco
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "robot"))
-from filters import GyroLowPass, DownFilter   # the same filter code runs on the Pi (robot/controller.py)
+from filters import GyroLowPass, GyroNotch, DownFilter   # the same filter code runs on the Pi (robot/controller.py)
 
 MODEL = os.environ.get("MODEL_XML") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim", "roadrunner_mini.xml")
 SIM_DT = float(os.environ.get("SIM_DT", "0.002"))   # s: physics step. 2 ms gives the same report card as 1 ms and trains 1.75x faster (2026-10-30)
@@ -49,6 +49,8 @@ MAX_DELAY = int(os.environ.get("MAX_DELAY", "1"))   # IMU readings arrive 0-1 st
 # Command delay: from the decision until the servo starts to move. The bench test (wheel_bench.py, 2026-10-30)
 # measured 10-25 ms dead time in PWM mode, so each game gets a delay of 10-30 ms, in physics steps.
 # Before this it was 0-40 ms in whole 20 ms steps (as Open Duck), and 40 ms caused most falls (diag_017.py).
+# Trial (review round 8): 10-40 ms (ACT_DELAY_MS=10,40) to cover ~16 ms of extra real lag at 3.5 Hz; it did not
+# help (drive_028, drive_030). The report card "stress" lines use 40 ms.
 ACT_DELAY_MS = tuple(float(x) for x in os.environ.get("ACT_DELAY_MS", "10,30").split(","))
 # Extra hip delay in decisions. 0: the fitted servo delay (24 ms, sim/build_model_v03.py) is covered by
 # ACT_DELAY_MS. Kept as a knob for tests (with the old 0x55 = 254 acceleration limit it would have been 1).
@@ -58,13 +60,20 @@ HIP_MAX_SPEED = 4.7       # rad/s: STS3215 top speed at 7.4 V (0.222 s per 60 de
 # Hip target speed limit (sim and Pi): the brain's fast hip moves fed the 11 Hz buzz (hips free stood
 # 3-8 s, hips frozen about 40 s). 1 rad/s still lets it crouch and lean (0.35 rad in 0.35 s).
 HIP_SLEW = float(os.environ.get("HIP_SLEW", "1.0"))   # rad/s
-# Gyro low-pass in the observation (robot/filters.py). The Pi uses GYRO_LP_PI; the sim randomises the cut-off.
-GYRO_LP_PI = float(os.environ.get("GYRO_LP", "6.0"))  # Hz; 0 = off (older brains)
+# Gyro filter in the observation (robot/filters.py), the same on the Pi (values go into the brain file).
+# Default: 2-pole low-pass at 6 Hz (sim 5-8 Hz per game), as drive_022-027 and drive_031.
+# Trials 2026-11-01 (review round 8): a 10.5 Hz notch (GYRO_NOTCH=10.5, drive_028/029) slowed training; a
+# 10 Hz low-pass (GYRO_LP=10 GYRO_LP_RANGE=9,11, drive_030) trained but rocked at 3.5 Hz the same as drive_026.
+# So the filter delay does not set the 3.5 Hz rocking; the score does (drive_env WOBBLE_PITCH_W).
+GYRO_NOTCH_PI = float(os.environ.get("GYRO_NOTCH", "0"))      # Hz, notch centre on the Pi; 0 = no notch
+GYRO_NOTCH_Q = float(os.environ.get("GYRO_NOTCH_Q", "1.0"))
+GYRO_NOTCH_RANGE = (9.5, 11.5)                                 # Hz, random per game (notch only)
+GYRO_LP_PI = float(os.environ.get("GYRO_LP", "15.0" if GYRO_NOTCH_PI > 0 else "6.0"))  # Hz; 0 = off (older brains)
 # IMU "down" (review round 7): the sim feeds its accelerometer and gyro through the Pi's complementary filter,
 # so wheel pushes give the same false tilt as on the robot. 0 = old true-gravity observation.
 IMU_TAU_PI = float(os.environ.get("IMU_TAU", "1.0"))   # s, the Pi's filter time constant (exported with the brain)
 IMU_TAU_RANGE = (0.3, 1.0)                              # s, random per game in the sim
-GYRO_LP_RANGE = (5.0, 8.0)                            # Hz, random per game (realism on)
+GYRO_LP_RANGE = tuple(float(x) for x in os.environ.get("GYRO_LP_RANGE", "5,8").split(","))   # Hz, random per game (low-pass only, no notch)
 # Wheel speed seen by the brain = position difference over one decision, as on the Pi (robot.read_joints).
 # Before: the instant speed. The two differ at 10 Hz (half a step late, smaller).
 WHEEL_POSDIFF = os.environ.get("WHEEL_POSDIFF", "1") == "1"
@@ -81,7 +90,10 @@ WHEEL_DEADBAND_RANGE = (0.6, 1.4)   # x nominal, random per game
 # ~0.025 kg m^2 on 4 joints -> ~27 Nm/rad each at 10.5 Hz; the real wheel-to-gyro ratio fits 10-15 better.
 # Not measured directly: randomised wide, 10-40 Nm/rad, damping ratio 0.05-0.3.
 HIP_SPRING_K = float(os.environ.get("HIP_SPRING_K", "20"))      # Nm/rad nominal; 0 = old slop joint
-HIP_SPRING_K_RANGE = (0.5, 2.0)     # x nominal
+HIP_SPRING_K_RANGE = tuple(float(x) for x in os.environ.get("HIP_SPRING_K_RANGE", "0.5,2.0").split(","))   # x nominal
+# Review round 8c (2026-11-01): the body-on-legs mode (the one the IMU sees) is at 8.9-10.9 Hz for k 10 and
+# 16-18 Hz for k 20-40 (mjd_transitionFD). The real body buzz was 10.0-11.7 Hz, which is k about 10-13.
+# Candidate narrow range: HIP_SPRING_K=11 HIP_SPRING_K_RANGE=0.727,1.455 (k 8-16) and HARD_K=8.
 HIP_SPRING_ZETA = (0.05, 0.3)
 HIP_SPRING_LIMIT = 0.2              # rad: end stop of the flex joint (never reached in normal games)
 BODY_INERTIA = (0.5, 1.0)           # x the body's own pitch/roll/yaw inertia, random per game
@@ -172,8 +184,14 @@ class BalanceEnv:
         m.dof_armature[self.wheel_v] *= WHEEL_ARM_SCALE
         self.nominal.update(armature=m.dof_armature.copy(), jnt_range=m.jnt_range.copy(),
                             inertia=m.body_inertia.copy(), damping=m.dof_damping.copy())
-        self.gyro_lp = GyroLowPass(GYRO_LP_PI, POLICY_HZ) if GYRO_LP_PI > 0 else None
+        self.gyro_lp = self.make_gyro_filter(GYRO_NOTCH_PI)
         self.wheel_prev = None
+
+    def make_gyro_filter(self, notch_hz):
+        """The gyro filter of one game (the Pi builds the same one from the brain file: filters.make_gyro_filter)."""
+        if GYRO_NOTCH_PI > 0:
+            return GyroNotch(notch_hz, GYRO_NOTCH_Q, GYRO_LP_PI, POLICY_HZ)
+        return GyroLowPass(GYRO_LP_PI, POLICY_HZ) if GYRO_LP_PI > 0 else None
 
     def ablate(self, parts):
         """Turn parts of the v3 servo model off (for experiments only)."""
@@ -326,7 +344,9 @@ class BalanceEnv:
             m.dof_damping[self.hip_bl_dof] = 2 * zeta * np.sqrt(k * 0.025 / 4)
         if self.down_filter is not None:                        # IMU filter time constant per game
             self.down_filter = DownFilter(IMU_TAU_PI if s == 0 else rng.uniform(*IMU_TAU_RANGE))
-        if self.gyro_lp is not None:                            # gyro filter cut-off per game
+        if GYRO_NOTCH_PI > 0:                                   # gyro notch centre per game (the low-pass stays at GYRO_LP)
+            self.gyro_lp = self.make_gyro_filter(GYRO_NOTCH_PI if s == 0 else rng.uniform(*GYRO_NOTCH_RANGE))
+        elif self.gyro_lp is not None:                          # old low-pass: cut-off per game
             self.gyro_lp = GyroLowPass(GYRO_LP_PI if s == 0 else rng.uniform(*GYRO_LP_RANGE), POLICY_HZ)
         m.jnt_range[self.wheel_bl] = nom["jnt_range"][self.wheel_bl] * f(0.5, 2.0)   # slop +/-0.25..1 deg
         # wheel motor back-EMF slope: the bench test gave 5.76 rad/s at 6.2 V (from position), +/-5 %

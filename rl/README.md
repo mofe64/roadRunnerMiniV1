@@ -30,6 +30,8 @@ Obey these rules. Each rule comes from a mistake that cost training time.
 10. **Measure the body-to-wheel ratio only with the hips frozen.** With free hips, the brain's hip moves change the result.
 11. **The level-1 start leans and shoves belong to the plant.** Measure them again when the sim plant changes (`envscan`: the largest values that the plant recovers 9 of 10 times, then use 80 %). Mistake (2026-11-01): drive_022 used the old limits and the level stopped at 96 %.
 12. **The score must ask for the posture that you want.** If posture costs almost nothing, the brain finds a strange posture (drive_020 to drive_022 stood with the hips swung far over). Size each score term so it matters against the other terms.
+13. **An observation filter is part of the robot.** The brain learns the delay of every filter on its sensors. Print the phase of the filter at the loop frequencies (the report card does it for the gyro filter). Change a filter only together with a new training run, and use the same filter code in the sim and on the Pi (`../robot/filters.py`, values in the brain file).
+   - Mistake (2026-11-01): the 6 Hz gyro low-pass stopped the 11 Hz buzz, but it made the gyro 50 degrees late at 3.5 Hz. drive_026 then rocked at 3.5 Hz on the robot, more with a full battery. A Pi-only filter change makes it worse: the brain falls or the 11 Hz buzz comes back.
 
 ## Tools
 - Simulator: MuJoCo 3.17 on the Mac CPU (Apple M3 Pro: 5 fast cores and 6 slow cores).
@@ -57,7 +59,8 @@ Obey these rules. Each rule comes from a mistake that cost training time.
 - `SIM_DT` (default 0.002 s): the physics step. 2 ms gives the same report card as 1 ms and is 1.75 times faster.
 - `N_ROBOTS` (default 8): the number of robot copies. On the M3 Pro, 10 can be a little faster. Look at the decisions per second in the log.
 - `MIRROR` (default 1): the two legs get the same hip commands. `MIRROR=0` gives each hip its own command. Policies trained before 2026-10-30 10:40 used `MIRROR=0` and the old realism; they do not operate with the current files.
-- `ACT_DELAY_MS` (default 10,30): the command delay range in ms (measured: 10 to 25 ms).
+- `ACT_DELAY_MS` (default 10,30): the command delay range in ms (measured: 10 to 25 ms). 10,40 was a trial (drive_028/030) and did not help.
+- `GYRO_LP` (default 6 Hz), `GYRO_LP_RANGE` (default 5,8): the gyro low-pass on the Pi and its random range in the sim. drive_030 was a trial with `GYRO_LP=10 GYRO_LP_RANGE=9,11`. `GYRO_NOTCH` (default 0 = off) and `GYRO_NOTCH_Q`: the notch of the trial brains drive_028/029. `sim_test.py` reads the filter of the brain from its file.
 - `MAX_DELAY` (default 1): the IMU delay, 0 to 1 policy steps (0 to 20 ms). Not measured yet.
 - `LEVEL_UP_SHARE` (default 0.9), `LEVEL_GAMES` (default 100): the gate.
 - `CARD_GAMES` (default 50): games for each report card line.
@@ -66,7 +69,11 @@ Obey these rules. Each rule comes from a mistake that cost training time.
 ## The driving game (current)
 - Observation (3 frames of history): gravity direction, gyro, hip positions and speeds, wheel speeds, the commands, two "behind schedule" signals (speed and heading) and the last action. The two signals slowly forget old errors (0.99 for each step), so they cannot stay at their limit.
 - Action: 2 hip commands (front and rear, the same for both legs) and 2 wheel PWM commands. The PWM command goes directly to the servo. The Pi adds nothing.
-- Realism for each game: command delay 10 to 30 ms, IMU delay 0 to 20 ms, IMU mounted up to 1 degree crooked, small sensor noise, battery 0.85 to 1.135 (9.4 to 12.6 V), masses +/-10 %, centre of mass +/-10 mm, tyre grip 0.5 to 1.0, servo zero offsets +/-1.7 degrees, wheel friction 0.3 to 3 times (not measured), wheel armature 0.7 to 1.4 times (measured).
+- Gyro filter: a 2-pole low-pass at 6 Hz (5 to 8 Hz in the sim). Trials on 2026-11-01: a 10.5 Hz notch (drive_028/029) made the training stop at level 76 to 82 %; a 10 Hz low-pass (drive_030) rocked at 3.5 Hz the same as drive_026.
+- Wobble score (from drive_031, review round 8d): -1.0 x min(pitch rate^2, 1) - 0.05 x roll rate^2, from the true gyro. Before: -0.05 x (pitch rate^2 + roll rate^2), which let the brain rock at 3.5 Hz for almost no cost. `WOBBLE_PITCH_W`, `WOBBLE_CLIP`.
+- Report card: "pitch rms" and "wheel travel rms" over the last 5 s of each game; CALM MARK on standing lines: pitch rms below 1 degree, wheel travel rms below 0.3 rad (a slow back-and-forth hunt must not replace the 3.5 Hz rocking).
+- Report card "stress" lines: full battery, 40 ms command delay, wheel dead band 0.02. Pass: 2.5-5 Hz gyro band below 0.05 rad/s in every game and no 9-13 Hz buzz. On the robot: `buzz_report.py` with a full battery, 2.5-5 Hz band below 0.10 rad/s.
+- Realism for each game: command delay 10 to 40 ms, IMU delay 0 to 20 ms, IMU mounted up to 1 degree crooked, small sensor noise, battery 0.85 to 1.135 (9.4 to 12.6 V), masses +/-10 %, centre of mass +/-10 mm, tyre grip 0.5 to 1.0, servo zero offsets +/-1.7 degrees, wheel friction 0.3 to 3 times (not measured), wheel armature 0.7 to 1.4 times (measured).
 
 ## Tasks (in this sequence)
 1. Stay up and drive with speed, turn and height commands (in progress).

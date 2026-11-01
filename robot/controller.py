@@ -7,7 +7,7 @@ Units are the simulator's: hip angles in rad in the simulator's joint frame (0 =
 down, + = swings back), wheel speeds in rad/s (+ = rolling forward), body frame X forward, Y left, Z up.
 """
 import numpy as np
-from filters import GyroLowPass
+from filters import make_gyro_filter
 
 
 class Controller:
@@ -22,9 +22,9 @@ class Controller:
         self.hold_max = float(c["hold_max"]) if "hold_max" in c else None   # brains before drive_021 have no hold odometer
         self.hold = 0.0
         self.stand = brain.stand_hips(self.command[2])
-        # drive_022 and later: the gyro is low-passed before the brain sees it, as in the simulator
-        lp = float(c["gyro_lp"]) if "gyro_lp" in c else 0.0
-        self.gyro_lp = GyroLowPass(lp, self.hz) if lp > 0 else None
+        # drive_022 and later: the gyro is filtered before the brain sees it, as in the simulator
+        # (drive_022-027: 6 Hz low-pass; drive_028/029: notch; drive_030 on: 10 Hz low-pass; values in the brain file)
+        self.gyro_lp = make_gyro_filter(c, self.hz)
 
     def set_command(self, speed, turn, height):
         """A new joystick command, clipped to what the brain was trained on. A new command starts a new

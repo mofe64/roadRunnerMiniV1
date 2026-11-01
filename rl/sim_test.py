@@ -12,12 +12,19 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "robot"))
+RUN = os.environ.get("RUN", "drive_026")
+# The sim must use the gyro filter that this brain was trained with (round 8: brains differ), so read it
+# from the brain file before the sim is loaded. An env var that is already set wins.
+_c = np.load(os.path.join(HERE, "..", "robot", "brains", f"brain_{RUN}.npz"))
+os.environ.setdefault("GYRO_NOTCH", str(float(_c["gyro_notch"])) if "gyro_notch" in _c.files else "0")
+os.environ.setdefault("GYRO_LP", str(float(_c["gyro_lp"])) if "gyro_lp" in _c.files else "0")
+if "gyro_notch_q" in _c.files:
+    os.environ.setdefault("GYRO_NOTCH_Q", str(float(_c["gyro_notch_q"])))
 from drive_env import DriveEnv
 from balance_env import WHEEL_TORQUE
 from brain import Brain
 from controller import Controller
 
-RUN = os.environ.get("RUN", "drive_026")
 brain = Brain(os.path.join(HERE, "..", "robot", "brains", f"brain_{RUN}.npz"))
 
 
