@@ -3,6 +3,8 @@
   python3 depth_cam.py --check        step 1: USB speed, frame rate, floor fit, one depth picture
   python3 depth_cam.py --watch        step 2: print the free distance ahead, left and right, 15 times a second
   python3 depth_cam.py --watch --head-pitch 20   the same, head turned 20 deg nose down
+  python3 depth_cam.py --watch --floor           robot off (not standing): measure the camera height and tilt
+                                                  from the floor at the start and use them
 
 This program does not move a servo. The robot can be off (only the Pi and the camera need power).
 Put the robot on the floor with open floor in front of it (at least 1.5 m).
@@ -10,7 +12,8 @@ Put the robot on the floor with open floor in front of it (at least 1.5 m).
 Needs: depthai 2.33.0.0 in .venv (see DEPTH.md). Depth: 640 x 400, 15 frames a second, extended disparity
 (the near limit is about 20 cm from the lens; without it, about 35 cm).
 """
-import argparse, json, os, socket, sys, time, zlib, struct
+import argparse, json, os, socket, sys, time, zlib, struct, warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)   # depthai 2.33: HIGH_DENSITY name
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 from obstacle import Obstacles, camera_pose, fit_floor
@@ -57,6 +60,8 @@ def main():
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--leg", type=float, default=120, help="leg height in mm (65-140, stand 120)")
     ap.add_argument("--head-pitch", type=float, default=0.0, help="head pitch in deg, + = nose down")
+    ap.add_argument("--floor", action="store_true", help="--watch: use the camera height and tilt from a floor fit "
+                    "at the start (open floor in front), not the standing-robot model")
     ap.add_argument("--seconds", type=float, default=10.0, help="--check: how long to count frames")
     args = ap.parse_args()
     if not (args.check or args.watch):
@@ -116,12 +121,21 @@ def main():
             print("STEP 1", "PASS" if ok else "FAIL")
             return
 
+        cam = None
+        if args.floor:
+            for _ in range(10):                       # let the auto exposure settle
+                q.get()
+            fl = fit_floor(q.get().getFrame(), fx, fy, cx, cy)
+            if fl is None:
+                raise SystemExit("Floor fit failed: put open floor in front of the camera and start again.")
+            cam = (fl[0], camera_pose(leg, head)[1], fl[1])
+            print(f"Using the floor fit: lens {fl[0] * 1000:.0f} mm above the floor, tilt {np.degrees(fl[1]):+.1f} deg")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         print("Watching. Move your hand or a box in front of the robot. Ctrl+C = stop.")
         try:
             while True:
                 fr = q.get()
-                r = obs.find(fr.getFrame(), leg, head)
+                r = obs.find(fr.getFrame(), leg, head, cam=cam)
                 r["t"] = time.time()
                 r["age_ms"] = (dai.Clock.now() - fr.getTimestamp()).total_seconds() * 1000
                 sock.sendto(json.dumps(r).encode(), ("127.0.0.1", PORT))
