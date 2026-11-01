@@ -69,6 +69,8 @@ WHEEL_POSDIFF = os.environ.get("WHEEL_POSDIFF", "1") == "1"
 # 0.004 gives 159 x a - 16 x w, at x0.25 gives 260-280 x a - 26..28 x w (RL thread, 2026-11-01).
 # The in-air spin-up only bounds the time constant (<= 20 ms), so it cannot tell. Randomised 0.6-2x around it.
 WHEEL_ARM_SCALE = float(os.environ.get("WHEEL_ARM_SCALE", "0.25"))
+WHEEL_DEADBAND = float(os.environ.get("WHEEL_DEADBAND", "0.035"))   # PWM below this gives no push: real floor logs 075421/083353 fit 0.03-0.04 (2026-11-01)
+WHEEL_DEADBAND_RANGE = (0.6, 1.4)   # x nominal, random per game
 # Flex between each hip servo and its leg (horn screws in 3.5 mm holes, knee pins, PLA links): a torsional
 # spring-damper in series at each hip, on the "backlash" joint (the old +/-0.5 deg free slop is replaced).
 # The real body rocks on the legs at 10-11 Hz with the encoders still: body inertia about the hips
@@ -255,7 +257,9 @@ class BalanceEnv:
             # Wheel servo in PWM mode, as measured on the bench (wheel_bench.py, 2026-10-30): the action IS
             # the PWM power, -1..+1. Nothing is added by the Pi. The push fades as the wheel speeds up
             # (back-EMF, in the model), and the brain sees the wheel speed, so it learns that itself.
-            self.d.ctrl[self.act_id[n]] = self.wheel_strength * WHEEL_TORQUE * a[4 + i]
+            p = a[4 + i]
+            p = np.sign(p) * max(abs(p) - self.wheel_deadband, 0.0)   # small powers give no push (measured on the floor, 2026-11-01)
+            self.d.ctrl[self.act_id[n]] = self.wheel_strength * WHEEL_TORQUE * p
         self.d.ctrl[self.act_id["head_yaw"]] = 0.0     # head looks straight ahead for now
         self.d.ctrl[self.act_id["head_pitch"]] = 0.0
 
@@ -295,6 +299,7 @@ class BalanceEnv:
         self.hip_offset = r(-0.03, 0.03, 4)                                        # servo zero offsets +/-1.7 deg
         self.wheel_strength = 1.0 + r(BATTERY[0] - 1.0, BATTERY[1] - 1.0)          # battery charge 0.85-1.135
         self.gravity_bias = 0.0 if "noise" in ABLATE else r(-GRAVITY_BIAS, GRAVITY_BIAS, 3)   # IMU mounted slightly crooked
+        self.wheel_deadband = WHEEL_DEADBAND * f(*WHEEL_DEADBAND_RANGE)   # wheel PWM dead band 0.021-0.049
         # Wheel servo (ST3215-HS) gearbox: not measured, so the ranges are WIDE. A brain that copes
         # with all of them should cope with the real one too, without a bench test.
         m.dof_frictionloss[self.wheel_v] = nom["frictionloss"][self.wheel_v] * f(0.3, 3.0, 2)
@@ -322,6 +327,7 @@ class BalanceEnv:
             self.randomise()
         else:
             self.hip_offset, self.wheel_strength, self.gravity_bias = np.zeros(4), 1.0, np.zeros(3)
+            self.wheel_deadband = WHEEL_DEADBAND
             self.act_delay = self.imu_delay = 0
         mujoco.mj_resetDataKeyframe(m, d, self.key)
         # start a little different every game, so the policy learns to handle many situations

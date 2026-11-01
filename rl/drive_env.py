@@ -211,6 +211,16 @@ def buzzing(g_rms, share):
     return bool(np.sqrt(share) * g_rms > 0.10 and share > 0.3)
 
 
+def rocking(A, V):
+    """Wheel use while standing (review round 6): mean |wheel action|, wheel speed rms (m/s), and growth =
+    mean |a| over the last minute / the first minute (a third of the game if shorter) (1.0 = steady; the real drive_024 grew until it fell).
+    A: mean wheel action per step, V: wheel speed per step in m/s. Same function for the card and the real CSV."""
+    A, V = np.abs(np.asarray(A, float)), np.asarray(V, float)
+    n = min(60 * POLICY_HZ, len(A) // 3)
+    growth = float(np.mean(A[-n:]) / max(np.mean(A[:n]), 1e-6)) if n > 0 else float("nan")
+    return float(np.mean(A)), float(np.std(V)), growth
+
+
 def buzz_numbers(G, A, DY, DW):
     """Gyro rms, gyro 9-13 Hz share, wheel sign flips per second, d(gyro)/d(wheel speed): the same four
     numbers are computed from the real robot's CSV, so sim and robot are compared the same way."""
@@ -236,6 +246,7 @@ def card_line(job):
     up, speeds, turns, heights, uneven = 0, [], [], [], []
     creep, at_limit, wheel_peak, hip_mag = [], [], [], []   # standing quality (2026-10-31: the real robot crept forward and fell)
     buzz = []                                               # gyro rms, 9-13 Hz share, flips, ratio per game (2026-11-01)
+    rock = []                                               # wheel |a|, wheel speed rms, growth per game (review round 6)
     for _ in range(CARD_GAMES):
         obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
         if hard:
@@ -264,6 +275,7 @@ def card_line(job):
                 if len(G) > 100:
                     Wv = np.diff(W)                       # wheel speed by position difference, as on the Pi
                     buzz.append(buzz_numbers(G[51:], A[51:], np.diff(G[51:]), np.diff(Wv[50:])))
+                    rock.append(rocking(A[50:], Wv[50:] * WHEEL_R))
                 break
     quality = (f", mean |hip| {np.mean(hip_mag):.2f}, hips at limit {100 * np.mean(at_limit):.0f} %, wheel peak {np.max(wheel_peak):.1f} rad/s"
                + (f", creep max {np.max(creep):.2f} m" if v == 0.0 and w == 0.0 else ""))
@@ -272,9 +284,11 @@ def card_line(job):
         g_rms, share, flips, ratio = np.nanmean(b[:, 0]), np.nanmean(b[:, 1]), np.nanmean(b[:, 2]), np.nanmedian(b[:, 3])
         quality += (f", gyro rms {g_rms:.2f}, 9-13 Hz {100 * share:.0f} %, flips {flips:.1f}/s"
                     + (f", d(wy)/d(wheel) {ratio:+.2f} (real -0.21..-0.25)" if freeze else ""))
-        if v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01)
+        if v == 0.0 and w == 0.0 and not freeze:   # standing pass marks (review 2026-11-01, rounds 3-6)
+            k = np.array(rock)
+            quality += f", wheel |a| {np.mean(k[:, 0]):.2f}, wheel speed rms {np.mean(k[:, 1]):.3f} m/s, growth {np.max(k[:, 2]):.1f}x"
             ok = (up == CARD_GAMES and g_rms < 0.3 and not buzzing(g_rms, share) and flips < 5 and np.mean(hip_mag) < 0.5
-                  and np.max(creep) < 0.5)
+                  and np.max(creep) < 0.5 and np.mean(k[:, 0]) < 0.2 and np.mean(k[:, 1]) < 0.05 and np.max(k[:, 2]) <= 1.2)
             quality += "  MARKS " + ("PASS" if ok else "FAIL")
     return (("  [HARD PLANT]" if hard else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
             f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
