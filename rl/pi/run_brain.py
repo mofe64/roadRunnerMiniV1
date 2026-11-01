@@ -20,13 +20,13 @@ from controller import Controller
 from robot import Robot
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--brain", default=os.path.join(HERE, "brain_drive_020.npz"))
+ap.add_argument("--brain", default=os.path.join(HERE, "brain_drive_026.npz"))   # working brain since 2026-11-01
 ap.add_argument("--air", action="store_true", help="wheels in the air: no tip-over stop, no battery stop")
 ap.add_argument("--held", action="store_true")
 ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
 ap.add_argument("--gyro-lp", type=float, default=0.0, help="test (review 2026-11-01 step 0): low-pass the gyro the brain sees, cut-off in Hz (e.g. 6)")
 ap.add_argument("--fast-imu", action="store_true", help="also log the raw IMU about 200 times a second (logs/imu_<time>.csv)")
-ap.add_argument("--imu-tau", type=float, default=0.0, help="test (review round 7): IMU filter time constant in s (default: the brain's, else 0.5)")
+ap.add_argument("--imu-tau", type=float, default=0.0, help="IMU filter time constant in s (default: the brain's, else 2.0)")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
 args = ap.parse_args()
 
@@ -59,6 +59,8 @@ hz = float(brain.c["policy_hz"]); dt = 1.0 / hz
 robot = Robot()
 if float(brain.c.get("imu_tau", 0)) > 0:      # brains from drive_028 on were trained with the Pi IMU filter at this time constant
     robot.imu.tau = float(brain.c["imu_tau"])
+else:   # older brains (true gravity in the sim): a slow filter holds the spot better (drive_026 test 2026-11-01, Mofe chose it)
+    robot.imu.tau = 2.0
 if args.imu_tau > 0:
     robot.imu.tau = args.imu_tau
 print(f"IMU filter time constant {robot.imu.tau:.1f} s")
