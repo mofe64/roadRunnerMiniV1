@@ -3,6 +3,7 @@
   python3 run_brain.py --air       robot on a box, wheels in the air: check that everything moves the right way
   python3 run_brain.py --held      hold the robot upright on the floor with your hands near it
   python3 run_brain.py             normal run
+  python3 run_brain.py --freeze-hips   test: hips held at the stand pose, the brain drives the wheels only
 Keys (in this terminal): w/s faster/slower (0.05 m/s), a/d turn left/right (0.5 rad/s), r/f taller/lower (1 cm),
 space = stand still, q = stop. The robot STOPS by itself if it tips more than 25 deg, if the battery is low,
 or if a servo stops answering. When it stops, the legs go limp: be ready to catch it.
@@ -21,6 +22,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--brain", default=os.path.join(HERE, "brain_drive_020.npz"))
 ap.add_argument("--air", action="store_true", help="wheels in the air: no tip-over stop, no battery stop")
 ap.add_argument("--held", action="store_true")
+ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
 args = ap.parse_args()
 
@@ -98,6 +100,8 @@ try:
             reason = "hip far from its target (" + ", ".join(f"{np.degrees(a):+.0f}" for a in j[0]) + " deg): servo fault"
             break
         target, power, action = ctl.step(down, gyro, *j)
+        if args.freeze_hips:
+            target = ctl.hip_target = np.asarray(goal, dtype=float).copy()   # hips stay at the stand pose
         robot.write_hips(target)
         robot.write_wheels(power)
         t_write = time.perf_counter()

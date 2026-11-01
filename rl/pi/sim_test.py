@@ -54,6 +54,7 @@ def closed_loop(games=10):
         for g in range(games):
             env.reset(pitch=env.rng.uniform(-0.035, 0.035))
             env.command = np.array([v, w, h]); env.next_command = 10 ** 9
+            env.stand_hips = brain.stand_hips(h)      # reset picked a random height: use the stand pose of THIS command
             ctl = Controller(brain); ctl.set_command(v, w, h); ctl.reset(env.d.qpos[env.hip_q])
             while True:
                 gr, gy, hq, hv, wv = sensors(env)
