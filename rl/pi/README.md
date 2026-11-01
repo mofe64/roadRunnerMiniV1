@@ -45,3 +45,16 @@ Each run writes `logs/run_<time>.csv`. Send the newest log to Claude. It shows t
 
 ## Battery
 The program reads the battery voltage from the wheel servos. It warns at 10.8 V and stops at 10.5 V (3S LiPo). Disconnect the battery when the robot is off.
+
+## Drive with a gamepad (Xbox One pad over Bluetooth, the same as Open Duck)
+
+1. **Install pygame (one time):** on the Pi, in `rl/pi`: `.venv/bin/pip install pygame`. Install it in the venv only.
+2. **Pair the pad (one time):** turn the pad on. Push and hold the small pair button on the top of the pad until the logo flashes fast. On the Pi: `bluetoothctl`, then `scan on`. When the pad shows (for example "Xbox Wireless Controller"), type `pair <address>`, `trust <address>`, `connect <address>`, then `exit`. The logo stops flashing. Next time, turn on the pad and it connects by itself.
+3. **Test the pad (no servos move):** `.venv/bin/python gamepad.py`. Push the left stick up: speed goes up to +0.15. Push the right stick left: turn goes up (+ = left). Press A, B and the D-pad: their names show. If a stick or a button does the wrong thing, stop (Ctrl-C) and tell Claude what the screen shows.
+4. **Drive:** `.venv/bin/python run_brain.py --pad`. The script stops before any servo moves if it does not find the pad.
+   - Left stick up/down: speed (forward to 0.15 m/s, back to 0.10 m/s). Right stick left/right: turn (to 1.0 rad/s).
+   - D-pad up/down: taller/lower, 1 cm for each press. A: stand still. B: STOP (the legs go limp, be ready to catch the robot).
+   - The speed and the turn change in steps (0.05 m/s, 0.25 rad/s), at most 5 steps a second. Release the stick and the robot slows down in steps to a stand.
+   - If the pad disconnects, the robot stands still in place and keeps its balance. Press q in the terminal to stop it, or connect the pad again. After a connect, put the sticks at the centre before the robot moves again.
+   - q and space in the terminal work as before. The w/s/a/d keys do nothing while the pad drives.
+   - The log has one more column at the end, `pad`: 1 = pad connected, 0 = pad lost, -1 = no pad.
