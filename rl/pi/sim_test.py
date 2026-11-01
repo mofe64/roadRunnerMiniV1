@@ -39,7 +39,8 @@ def buzz(gyro_y, wheel_a):
     P = np.abs(np.fft.rfft(g * np.hanning(len(g)))) ** 2; f = np.fft.rfftfreq(len(g), 0.02)
     share = P[(f >= 9) & (f <= 13)].sum() / max(P[f > 0.5].sum(), 1e-12)
     a = np.asarray(wheel_a)
-    return float(share), float((np.diff(np.sign(a)) != 0).sum() / (len(a) / 50.0))
+    from drive_env import count_flips
+    return float(share), float(count_flips(a) / (len(a) / 50.0))
 
 
 def frozen(games=10):

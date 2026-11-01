@@ -1,0 +1,20 @@
+"""Buzz numbers from a real run log, computed the same way as the sim report card (drive_env.buzz_numbers):
+gyro rms, gyro 9-13 Hz share, wheel action flips per second (zero crossings by more than 0.1).
+Run in rl/:  .venv/bin/python pi/buzz_report.py pi/logs/run_<time>.csv [more files]
+The first 1 s (hand release) is skipped. Pass marks: gyro rms < 0.3, 9-13 Hz share < 30 %, flips < 5/s."""
+import os, sys
+import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from drive_env import count_flips, POLICY_HZ
+
+for path in sys.argv[1:]:
+    d = np.genfromtxt(path, delimiter=",", names=True)
+    t = d["t"]; keep = t > t[0] + 1.0
+    g, a = d["wy"][keep], 0.5 * (d["a3"][keep] + d["a4"][keep])     # gyro y (body pitch rate), mean wheel action
+    x = g - g.mean()
+    P = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2; f = np.fft.rfftfreq(len(x), 1.0 / POLICY_HZ)
+    share = P[(f >= 9) & (f <= 13)].sum() / max(P[f > 0.5].sum(), 1e-12)
+    flips = count_flips(a) / (len(a) / POLICY_HZ)
+    ok = np.std(g) < 0.3 and share < 0.3 and flips < 5
+    print(f"{os.path.basename(path)}: {t[-1] - t[0]:.1f} s, gyro rms {np.std(g):.2f}, 9-13 Hz {100 * share:.0f} %, "
+          f"flips {flips:.1f}/s, wheel |a| {np.mean(np.abs(a)):.2f}  MARKS {'PASS' if ok else 'FAIL'}")

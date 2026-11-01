@@ -36,15 +36,17 @@ LEAK = 0.99
 # (the lag above forgets it in ~2 s; drive_020 crept 0.9 m on the real robot and fell). 0 while driving.
 HOLD_MAX = 1.0            # m: clipped, as the odometer in balance_env
 HOLD_W = float(os.environ.get("HOLD_W", "1.0"))     # score: -HOLD_W x (m off)^2 while holding
-HIP_W = float(os.environ.get("HIP_W", "0.1"))       # score: -HIP_W x mean(hip action^2): do not live at the hip limit
+FLIP_BAND = 0.1                                      # wheel action must cross zero by more than this to count as a flip
+HIP_W = float(os.environ.get("HIP_W", "1.0"))       # score: -HIP_W x mean(hip action^2): stand with centred hips (0.1 was too small: review 2026-11-01 round 4)
+UPRIGHT_W = float(os.environ.get("UPRIGHT_W", "10.0"))   # score: -UPRIGHT_W x tilt^2: stand straight (2 let it lean 7 deg back, round 4)
 SMOOTH_W = float(os.environ.get("SMOOTH_W", "0.2"))  # score: -SMOOTH_W x sum(action change^2); was 0.05 (drive_021 buzzed on the robot)
 # Experiments: DRIVE_PARTS=speed trains speed commands only (no turns, no height changes)
 CARD_GAMES = int(os.environ.get("CARD_GAMES", "50"))   # games per report card line (6 was too few: one fall = 17 %)
 DRIVE_PARTS = os.environ.get("DRIVE_PARTS", "speed,turn,height").split(",")
 # Driving uses smaller start leans and shoves than the balance game (12 deg, 0.45 N s). Those are at the
 # robot's physical limit, so the brain kept all its spare wheel speed for catching them and drove at half speed.
-DRIVE_START_LEAN = np.radians(8)
-DRIVE_SHOVE_MAX = 0.30
+DRIVE_START_LEAN = np.radians(6)   # level-1 start lean: 80 % of what the v022 plant recovers 9/10 (envscan 2026-11-01: 7 deg 20/20, 9 deg 14/20)
+DRIVE_SHOVE_MAX = 0.20   # N s, level-1 strongest shove (envscan: 0.2 19/20, 0.3 16/20); not below SHOVE_MAX_EASY 0.2
 
 
 class DriveEnv(BalanceEnv):
@@ -147,7 +149,7 @@ class DriveEnv(BalanceEnv):
         go = 2.0 * np.exp(-(forward - self.command[0]) ** 2 / 0.01) - 3.0 * abs(forward - self.command[0])
         steer = 1.0 * np.exp(-(turn - self.command[1]) ** 2 / 0.03) - 0.2 * abs(turn - self.command[1])
         tall = 0.5 * np.exp(-(self.height() - self.command[2]) ** 2 / 0.0001)   # points for the right height (+/-1 cm)
-        upright = -2.0 * tilt ** 2
+        upright = -UPRIGHT_W * tilt ** 2
         wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
         smooth = -SMOOTH_W * np.sum((action - self.last_action) ** 2)
         hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
@@ -192,13 +194,21 @@ def hard_plant(env):
     m.body_inertia[env.torso] = env.nominal["inertia"][env.torso] * 0.5
 
 
+def count_flips(A, band=FLIP_BAND):
+    """Wheel action sign flips: only a swing from above +band to below -band (or back) counts, so small
+    dither around zero is not a flip (review 2026-11-01 round 4). Same function for the card and the real CSV."""
+    s = np.sign(np.asarray(A, float)) * (np.abs(np.asarray(A, float)) > band)
+    s = s[s != 0]
+    return int((np.diff(s) != 0).sum())
+
+
 def buzz_numbers(G, A, DY, DW):
     """Gyro rms, gyro 9-13 Hz share, wheel sign flips per second, d(gyro)/d(wheel speed): the same four
     numbers are computed from the real robot's CSV, so sim and robot are compared the same way."""
     g = np.asarray(G) - np.mean(G)
     P = np.abs(np.fft.rfft(g * np.hanning(len(g)))) ** 2; f = np.fft.rfftfreq(len(g), 1.0 / POLICY_HZ)
     share = P[(f >= 9) & (f <= 13)].sum() / max(P[f > 0.5].sum(), 1e-12)
-    flips = (np.diff(np.sign(A)) != 0).sum() / (len(A) / POLICY_HZ)
+    flips = count_flips(A) / (len(A) / POLICY_HZ)
     ratio = np.polyfit(DW, DY, 1)[0] if len(DW) > 10 else float("nan")
     return float(np.std(G)), float(share), float(flips), float(ratio)
 

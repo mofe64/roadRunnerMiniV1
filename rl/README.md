@@ -26,6 +26,10 @@ Obey these rules. Each rule comes from a mistake that cost training time.
 6. **Find the cause before you change the reward.** Replay the failed games and record the random settings of each game. Then find which setting goes with the failures. Do one change at a time.
 7. **Use one truth for each value.** The wheel speed comes from the position readings (5.76 rad/s at 6.2 V). The speed register of the servo reads 13 % low. On the Pi, calculate the wheel speed from the position.
 8. **Keep the structure simple.** The two legs get the same hip commands (mirrored). This keeps the legs at the same length without a penalty.
+9. **Compare the sim and the robot with the same measurement.** Use the same function for both (for example, wheel speed from the position difference, `buzz_report.py` and the report card use `count_flips`). Mistake (2026-11-01): the sim used the true wheel speed, the Pi used the position difference, and the real wheel looked 2x stronger.
+10. **Measure the body-to-wheel ratio only with the hips frozen.** With free hips, the brain's hip moves change the result.
+11. **The level-1 start leans and shoves belong to the plant.** Measure them again when the sim plant changes (`envscan`: the largest values that the plant recovers 9 of 10 times, then use 80 %). Mistake (2026-11-01): drive_022 used the old limits and the level stopped at 96 %.
+12. **The score must ask for the posture that you want.** If posture costs almost nothing, the brain finds a strange posture (drive_020 to drive_022 stood with the hips swung far over). Size each score term so it matters against the other terms.
 
 ## Tools
 - Simulator: MuJoCo 3.17 on the Mac CPU (Apple M3 Pro: 5 fast cores and 6 slow cores).
