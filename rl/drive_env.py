@@ -38,6 +38,7 @@ LEAK = 0.99
 HOLD_MAX = 1.0            # m: clipped, as the odometer in balance_env
 HOLD_W = float(os.environ.get("HOLD_W", "1.0"))     # score: -HOLD_W x (m off)^2 while holding
 HOLD_LIN = float(os.environ.get("HOLD_LIN", "3.0"))  # score: -HOLD_LIN x |m off| while holding (10 cm costs 0.3; the square alone cost 0.01 at 10 cm)
+HOLD_FLAT = float(os.environ.get("HOLD_FLAT", "0.02"))  # m: no linear hold cost within 2 cm; a dead-band wheel cannot hold closer, it hunts (real drive_026 rocked +/-5 cm, review round 6)
 FLIP_BAND = 0.1                                      # wheel action must cross zero by more than this to count as a flip
 HIP_W = float(os.environ.get("HIP_W", "1.0"))       # score: -HIP_W x mean(hip action^2): stand with centred hips (0.1 was too small: review 2026-11-01 round 4)
 UPRIGHT_W = float(os.environ.get("UPRIGHT_W", "10.0"))   # score: -UPRIGHT_W x tilt^2: stand straight (2 let it lean 7 deg back, round 4)
@@ -156,7 +157,7 @@ class DriveEnv(BalanceEnv):
         wobble = -0.05 * np.sum(self.d.sensordata[self.gyro:self.gyro + 2] ** 2)   # pitch and roll wobble only
         smooth = -SMOOTH_W * np.sum((action - self.last_action) ** 2)
         hips = -HIP_W * np.mean(np.asarray(action)[:-2] ** 2)          # hip actions (the last 2 are the wheels)
-        hold = -HOLD_W * self.hold ** 2 - HOLD_LIN * abs(self.hold) if self.command[0] == 0.0 else 0.0
+        hold = -HOLD_W * self.hold ** 2 - HOLD_LIN * max(abs(self.hold) - HOLD_FLAT, 0.0) if self.command[0] == 0.0 else 0.0
         # keep both legs the same length (Mofe saw it stand with one leg higher): 1 cm difference costs 0.3
         # (measured in the body's own frame: on flat ground both wheels touch, so uneven legs show as a body roll)
         legs = self.leg_lengths()
