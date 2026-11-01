@@ -223,7 +223,9 @@ try:
         height = float(np.clip(height, *[float(x) for x in brain.c["height_range"]]))
         v_want, t_want, limit, ex_state = speed, turn, -1.0, -1
         if guard is not None:
-            guard.send_pose(down, ctl.command[2], HEAD_PITCH)
+            guard.send_pose(down, ctl.command[2], HEAD_PITCH,
+                            extra={"wl": j[2][0], "wr": j[2][1], "gx": gyro[0], "gy": gyro[1], "gz": gyro[2],
+                                   "v": ctl.command[0], "w": ctl.command[1], "r": float(brain.c["wheel_r"])})
             limit = guard.update(time.monotonic())
             if explorer is not None:
                 ex_state = 0

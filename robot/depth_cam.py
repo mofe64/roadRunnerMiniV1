@@ -9,6 +9,9 @@
                                                   obstacle points in red (logs/watch_cam.png, watch_depth.png/.npy)
   python3 depth_cam.py --watch --robot           with run_brain.py --depth (second terminal): run_brain sends the
                                                   body pitch, leg height and head pitch 50 times a second
+  python3 depth_cam.py --watch --robot --record  the same, and record for the 3D colour map: colour pictures
+                                                  (JPEG) + depth (mm) 3 times a second and the wheel/gyro
+                                                  numbers 50 times a second, into logs/rec_<time>/
 
 This program does not move a servo. The robot can be off (only the Pi and the camera need power).
 Put the robot on the floor with open floor in front of it (at least 1.5 m).
@@ -23,9 +26,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 from obstacle import Obstacles, camera_pose, fit_floor, DEPTH_PORT, POSE_PORT
 
 W, H, FPS = 640, 400, 15
+RGB_W, RGB_H = 640, 360       # colour camera (CAM_A, 1080p scaled 1/3) for --record
+REC_HZ = 3.0                  # --record: pictures per second (depth 512 kB each before compression)
 
 
-def make_pipeline(dai, camera=False):
+def make_pipeline(dai, camera=False, colour=False):
     p = dai.Pipeline()
     left, right = p.create(dai.node.MonoCamera), p.create(dai.node.MonoCamera)
     for cam, sock in ((left, dai.CameraBoardSocket.CAM_B), (right, dai.CameraBoardSocket.CAM_C)):
@@ -45,7 +50,83 @@ def make_pipeline(dai, camera=False):
     if camera:                                        # the right camera picture, same view as the depth
         xr = p.create(dai.node.XLinkOut); xr.setStreamName("rect")
         st.rectifiedRight.link(xr.input)
+    if colour:                                        # --record: colour camera, JPEG made on the camera
+        rgb = p.create(dai.node.ColorCamera)
+        rgb.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+        rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+        rgb.setIspScale(1, 3)                         # 1920x1080 -> 640x360
+        rgb.setVideoSize(RGB_W, RGB_H)
+        rgb.setFps(FPS)
+        enc = p.create(dai.node.VideoEncoder)
+        enc.setDefaultProfilePreset(FPS, dai.VideoEncoderProperties.Profile.MJPEG)
+        enc.setQuality(85)
+        rgb.video.link(enc.input)
+        xj = p.create(dai.node.XLinkOut); xj.setStreamName("jpg")
+        enc.bitstream.link(xj.input)
     return p
+
+
+class Recorder:
+    """--record: saves into logs/rec_<time>/ for the 3D map (built later on the Mac):
+      calib.json      camera intrinsics (depth = right camera CAM_C 640x400, colour = CAM_A 640x360) and the
+                      CAM_C -> CAM_A extrinsics (depthai units: cm)
+      rgb/NNNNN.jpg   colour picture, depth/NNNNN.npz (uint16 mm, compressed), REC_HZ times a second
+      frames.csv      idx, wall time of the depth frame, depth and colour camera time stamps, pose from run_brain
+      odom.csv        every run_brain pose message (50 a second): wall time, pitch, wheel speeds, gyro, command
+    Files are written in a second thread: the obstacle loop does not wait for the SD card."""
+    def __init__(self, dev, dai):
+        import threading, queue
+        self.dir = os.path.join(HERE, "logs", "rec_" + time.strftime("%Y%m%d_%H%M%S"))
+        os.makedirs(os.path.join(self.dir, "rgb")); os.makedirs(os.path.join(self.dir, "depth"))
+        cal = dev.readCalibration()
+        C, A = dai.CameraBoardSocket.CAM_C, dai.CameraBoardSocket.CAM_A
+        with open(os.path.join(self.dir, "calib.json"), "w") as f:
+            json.dump({"depth_K": cal.getCameraIntrinsics(C, W, H), "depth_size": [W, H],
+                       "rgb_K": cal.getCameraIntrinsics(A, RGB_W, RGB_H), "rgb_size": [RGB_W, RGB_H],
+                       "depth_to_rgb_cm": cal.getCameraExtrinsics(C, A), "rec_hz": REC_HZ}, f, indent=1)
+        self.frames = open(os.path.join(self.dir, "frames.csv"), "w")
+        self.frames.write("idx,wall_t,depth_ts,rgb_ts,pitch,leg,head\n")
+        self.odom = open(os.path.join(self.dir, "odom.csv"), "w")
+        self.odom_keys = ["pitch", "leg", "head", "wl", "wr", "gx", "gy", "gz", "v", "w", "r"]
+        self.odom.write("wall_t," + ",".join(self.odom_keys) + "\n")
+        self.q, self.n, self.t_last, self.jpg = queue.Queue(maxsize=30), 0, 0.0, None
+        self.dropped = 0
+        self.th = threading.Thread(target=self._writer, daemon=True); self.th.start()
+
+    def pose(self, msg, wall_t):
+        self.odom.write(f"{wall_t:.4f}," + ",".join(f"{float(msg.get(k, float('nan'))):.5g}" for k in self.odom_keys) + "\n")
+
+    def frame(self, depth_mm, depth_ts, wall_t, jpg_pkt, pose):
+        """Call for each depth frame; jpg_pkt = newest colour packet (or None). Saves REC_HZ times a second."""
+        if jpg_pkt is not None:
+            self.jpg = jpg_pkt
+        if self.jpg is None or wall_t - self.t_last < 1.0 / REC_HZ:
+            return
+        self.t_last = wall_t
+        p = pose or {}
+        self.frames.write(f"{self.n},{wall_t:.4f},{depth_ts:.4f},{self.jpg.getTimestamp().total_seconds():.4f},"
+                          f"{p.get('pitch', float('nan')):.5g},{p.get('leg', float('nan')):.5g},"
+                          f"{p.get('head', float('nan')):.5g}\n")
+        try:
+            self.q.put_nowait((self.n, depth_mm.copy(), bytes(self.jpg.getData())))
+        except Exception:
+            self.dropped += 1
+        self.n += 1
+
+    def _writer(self):
+        while True:
+            item = self.q.get()
+            if item is None:
+                return
+            n, d, j = item
+            with open(os.path.join(self.dir, "rgb", f"{n:05d}.jpg"), "wb") as f:
+                f.write(j)
+            np.savez_compressed(os.path.join(self.dir, "depth", f"{n:05d}.npz"), depth=d)
+
+    def close(self):
+        self.q.put(None); self.th.join(timeout=10)
+        self.frames.close(); self.odom.close()
+        print(f"Recorded {self.n} pictures (dropped {self.dropped}) in {self.dir}")
 
 
 def write_png(path, img):
@@ -89,10 +170,14 @@ def main():
                     "no pose for 0.3 s = send nothing (run_brain then stops forward driving)")
     ap.add_argument("--save", action="store_true", help="--watch: every 2 s save logs/watch_cam.png (camera picture, "
                     "obstacle points red), logs/watch_depth.png and logs/watch_depth.npy")
+    ap.add_argument("--record", action="store_true", help="--watch --robot: record colour + depth + odometry "
+                    "for the 3D map into logs/rec_<time>/")
     ap.add_argument("--seconds", type=float, default=10.0, help="--check: how long to count frames")
     args = ap.parse_args()
     if not (args.check or args.watch):
         ap.error("use --check or --watch")
+    if args.record and not (args.watch and args.robot):
+        ap.error("--record needs --watch --robot (the odometry comes from run_brain.py --depth)")
     try:
         import depthai as dai
     except ImportError:
@@ -101,7 +186,7 @@ def main():
     if not dai.Device.getAllAvailableDevices():
         raise SystemExit("No OAK found. Check the USB-C cable (blue USB 3 port on the Pi) and the udev rule (DEPTH.md).")
 
-    with dai.Device(make_pipeline(dai, camera=args.save and args.watch)) as dev:
+    with dai.Device(make_pipeline(dai, camera=args.save and args.watch, colour=args.record)) as dev:
         usb = dev.getUsbSpeed().name
         print(f"OAK connected: {dev.getDeviceName()}  USB {usb}")
         if usb not in ("SUPER", "SUPER_PLUS"):
@@ -176,6 +261,10 @@ def main():
             pose_sock.bind(("127.0.0.1", POSE_PORT))
             pose_sock.setblocking(False)
             print("Robot mode: start run_brain.py --depth in the other terminal.")
+        rec = Recorder(dev, dai) if args.record else None
+        qj = dev.getOutputQueue("jpg", maxSize=2, blocking=False) if rec is not None else None
+        if rec is not None:
+            print(f"Recording into {rec.dir}")
         print("Watching. Move your hand or a box in front of the robot. Ctrl+C = stop.")
         try:
             while True:
@@ -184,6 +273,8 @@ def main():
                     while True:
                         try:
                             pose, t_pose = json.loads(pose_sock.recv(4096)), time.monotonic()
+                            if rec is not None:
+                                rec.pose(pose, time.time())
                         except BlockingIOError:
                             break
                         except (ValueError, OSError):
@@ -196,6 +287,9 @@ def main():
                     r = obs.find(fr.getFrame(), leg, head, cam=cam)
                 r["t"] = time.time()
                 r["age_ms"] = (dai.Clock.now() - fr.getTimestamp()).total_seconds() * 1000
+                if rec is not None:
+                    rec.frame(fr.getFrame(), fr.getTimestamp().total_seconds(), r["t"] - r["age_ms"] / 1000,
+                              qj.tryGet(), pose)
                 sock.sendto(json.dumps(r).encode(), ("127.0.0.1", DEPTH_PORT))
                 if qr is not None and time.monotonic() - t_save > 2.0:
                     rf = qr.tryGet()
@@ -212,6 +306,9 @@ def main():
                       f"right {r['right'] * 100:4.0f}  {bar:<30}", end="", flush=True)
         except KeyboardInterrupt:
             print()
+        finally:
+            if rec is not None:
+                rec.close()
 
 
 if __name__ == "__main__":

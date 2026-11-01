@@ -157,12 +157,16 @@ class DepthGuard:
             self.t_higher = None
         return self.limit
 
-    def send_pose(self, down, leg, head):
-        """Tell depth_cam.py the camera pose: body pitch (+ = nose down) from the IMU "down" vector."""
+    def send_pose(self, down, leg, head, extra=None):
+        """Tell depth_cam.py the camera pose: body pitch (+ = nose down) from the IMU "down" vector.
+        extra: more numbers for the depth_cam.py --record odometry file (wheel speeds, gyro, command)."""
         import json
         pitch = float(np.arctan2(down[0], -down[2]))
+        msg = {"pitch": pitch, "leg": float(leg), "head": float(head)}
+        if extra:
+            msg.update({k: float(v) for k, v in extra.items()})
         try:
-            self.pose.sendto(json.dumps({"pitch": pitch, "leg": float(leg), "head": float(head)}).encode(),
+            self.pose.sendto(json.dumps(msg).encode(),
                              ("127.0.0.1", POSE_PORT))
         except OSError:
             pass
