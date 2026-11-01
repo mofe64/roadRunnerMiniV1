@@ -54,6 +54,7 @@ class Obstacles:
         """Depth image (uint16 mm) -> F, L, H in the level frame (only valid pixels)."""
         z = depth_mm[::STEP, ::STEP].astype(np.float32) * 0.001
         ok = (z > 0.05) & (z < MAX_RANGE)
+        self.ok = ok                                    # grid of the used pixels (for the picture in depth_cam)
         z, x, y = z[ok], self.rx[ok] * z[ok], self.ry[ok] * z[ok]
         c, s = np.cos(tilt), np.sin(tilt)
         f = z * c - y * s           # forward along the floor from the lens
@@ -70,9 +71,14 @@ class Obstacles:
         cam_h, lens_f, tilt = cam if cam is not None else camera_pose(leg_height, head_pitch, body_pitch)
         f, l, h = self.points(depth_mm, cam_h, tilt)
         f = f + lens_f                                   # forward from the torso origin
-        solid = (h > FLOOR_MARGIN + MARGIN_PER_M * f) & (h < cam_h + TOP_MARGIN) & (f > 0)
+        # f > NOSE_X - 1 cm: nearer than the nose is the robot's own body (lid, bump), not an obstacle
+        solid = (h > FLOOR_MARGIN + MARGIN_PER_M * f) & (h < cam_h + TOP_MARGIN) & (f > NOSE_X - 0.01)
         out = {"points": int(f.size)}
         ang = np.arctan2(l, f)
+        self.solid = np.zeros(self.ok.shape, bool)      # grid: obstacle points in the corridor ahead (red)
+        self.solid[self.ok] = solid & (np.abs(l) < HALF_WIDTH)
+        self.side = np.zeros(self.ok.shape, bool)       # grid: obstacle points outside the corridor (yellow)
+        self.side[self.ok] = solid & ~(np.abs(l) < HALF_WIDTH)
         for name, sel in (("ahead", np.abs(l) < HALF_WIDTH),
                           ("left", (ang > np.radians(15)) & (ang < np.radians(45))),
                           ("right", (ang < -np.radians(15)) & (ang > -np.radians(45)))):
@@ -82,6 +88,67 @@ class Obstacles:
             else:
                 out[name] = max(0.0, float(np.partition(r, MIN_POINTS - 1)[MIN_POINTS - 1]) - NOSE_X)
         return out
+
+
+DEPTH_PORT = 5800     # depth_cam.py --watch -> run_brain.py: {"ahead", "left", "right", "t", ...}
+POSE_PORT = 5801      # run_brain.py -> depth_cam.py: {"pitch", "leg", "head", "t"} (rad, m, rad)
+
+
+class DepthGuard:
+    """run_brain.py side of step 3: limits the FORWARD speed command from the depth camera result.
+    Free distance ahead (from the nose): >= slow: no limit; slow..stop: limit falls in steps of `step` m/s;
+    <= stop: 0. No result for `stale` s (camera program not running, crashed, USB lost): 0.
+    Reverse and turn are never limited. The limit goes DOWN at once and UP only after it stayed higher
+    for `up_s` s (the depth noise must not make the command jump: each new command restarts the brain's
+    lag signals). Speeds snap to `step` (0.05 m/s = one w key press) for the same reason."""
+    def __init__(self, speed_max, slow=0.60, stop=0.30, stale=0.3, step=0.05, up_s=0.5, port=DEPTH_PORT):
+        import socket
+        self.speed_max, self.slow, self.stop, self.stale, self.step, self.up_s = speed_max, slow, stop, stale, step, up_s
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", port))
+        self.sock.setblocking(False)
+        self.pose = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.ahead, self.t_msg, self.limit, self.t_higher = None, -1e9, 0.0, None
+
+    def raw_limit(self, ahead):
+        if ahead is None or ahead <= self.stop:
+            return 0.0
+        if ahead >= self.slow:
+            return self.speed_max
+        v = self.speed_max * (ahead - self.stop) / (self.slow - self.stop)
+        return np.floor(v / self.step + 1e-9) * self.step
+
+    def update(self, now):
+        """Read all waiting results, return the forward speed limit (m/s). now = time.monotonic()."""
+        import json
+        while True:
+            try:
+                msg = json.loads(self.sock.recv(4096))
+            except BlockingIOError:
+                break
+            except (ValueError, OSError):
+                continue
+            self.ahead, self.t_msg = float(msg["ahead"]), now
+        want = self.raw_limit(self.ahead if now - self.t_msg < self.stale else None)
+        if want < self.limit:
+            self.limit, self.t_higher = want, None
+        elif want > self.limit:
+            self.t_higher = now if self.t_higher is None else self.t_higher
+            if now - self.t_higher >= self.up_s:
+                self.limit, self.t_higher = want, None
+        else:
+            self.t_higher = None
+        return self.limit
+
+    def send_pose(self, down, leg, head):
+        """Tell depth_cam.py the camera pose: body pitch (+ = nose down) from the IMU "down" vector."""
+        import json
+        pitch = float(np.arctan2(down[0], -down[2]))
+        try:
+            self.pose.sendto(json.dumps({"pitch": pitch, "leg": float(leg), "head": float(head)}).encode(),
+                             ("127.0.0.1", POSE_PORT))
+        except OSError:
+            pass
 
 
 def fit_floor(depth_mm, fx, fy, cx, cy, tries=500, seed=0):
@@ -192,4 +259,14 @@ if __name__ == "__main__":
             fails += must
         else:
             fails += abs(fl[0] - cam_h) > 0.005 or abs(fl[1] - tilt) > np.radians(1.5)
+    # DepthGuard: starts at 0, limit steps down at once, up only after 0.5 s, 0 when stale
+    g = DepthGuard(0.15, port=0)
+    seq = [(0.0, 1.0, 0.0), (0.6, 0.50, 0.10), (0.7, 0.40, 0.05), (0.8, 0.29, 0.0), (0.9, 1.0, 0.0),
+           (1.2, 1.0, 0.0), (1.45, 1.0, 0.15), (2.0, None, 0.0)]
+    for t, ahead, want in seq:
+        if ahead is not None:
+            g.ahead, g.t_msg = ahead, t
+        got = g.update(t)
+        fails += abs(got - want) > 1e-9
+        print(f"guard t {t:.2f} s ahead {ahead} -> limit {got:.2f} (want {want:.2f})")
     print("SELF-TEST", "PASS" if not fails else f"FAIL ({fails})")

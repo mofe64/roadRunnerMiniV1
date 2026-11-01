@@ -7,7 +7,7 @@ The depth camera finds the nearest obstacle in front of the robot. A safety laye
 ## The plan (5 steps)
 1. **Camera on the Pi.** The Pi gets depth pictures from the OAK-D Lite, 15 each second, 640 x 400. Program: `depth_cam.py --check`.
 2. **Nearest obstacle.** The Pi finds the nearest object in a corridor 30 cm wide in front of the wheels. It ignores the floor and objects lower than 3 cm. Programs: `obstacle.py` (the calculation), `depth_cam.py --watch` (live).
-3. **Safety layer.** In `run_brain.py`: if the free distance ahead is less than 60 cm, the forward speed becomes smaller. At 30 cm, the forward speed becomes 0. Reverse and turn stay available. If the camera stops sending, the forward speed becomes 0. Not written yet.
+3. **Safety layer.** `run_brain.py --depth`: if the free distance ahead is less than 60 cm, the forward speed becomes smaller (0.10, then 0.05 m/s). At 30 cm, the forward speed becomes 0. Reverse and turn stay available. If the camera stops sending for 0.3 s, the forward speed becomes 0. The head turns 20 deg nose down in the stand move. Written 2026-11-01, see "Step 5" below.
 4. **Turn to the open side.** When the robot stops for an obstacle, it turns to the side with more free distance (left or right sector, 15 to 45 deg), then it drives again. Not written yet.
 5. **Later (optional).** A brain that sees depth in the simulator. Do this only after steps 1 to 4 work.
 
@@ -55,7 +55,19 @@ If you see `No OAK found`: check the cable and do item 3 again. If you see `not 
    - A box at the left side: the `left` number becomes small, not `ahead`.
    - A cable on the floor: `go` (lower than 3 cm).
 
+## Step 5: the robot stops for an obstacle
+Two programs run at the same time on the Pi. Open two SSH terminals (`ssh mofe@roadrunner-mini.local`), and in each do `cd ~/roadRunnerMiniV1/rl/pi && source .venv/bin/activate`.
+
+1. Terminal 1: `python depth_cam.py --watch --robot`. It shows `waiting for run_brain.py --depth` until step 2 starts.
+2. Terminal 2: `python run_brain.py --depth` (add `--pad` for the gamepad). Do the usual start. In the stand move, the head turns 20 deg nose down.
+3. Test A (stand only, 30 s): do not drive. The robot must stand as well as before. Terminal 1 must show `go` with nothing in front.
+4. Test B (drive to a wall): put the robot 1.5 m from a wall or a big box, nose to the wall. Press `w` one time (0.05 m/s). The robot must stop about 30 cm from the wall. Terminal 2 shows `(camera: .. cm)` when the camera limits the speed.
+5. Press `s` to drive back. Press `q` to stop.
+
+If the robot does not stop: press `q` (or B on the pad) at once. Send the two terminal outputs and the newest `logs/run_<time>.csv` to Claude (columns `ahead` and `limit` are at the end).
+
 ## Files
 - `obstacle.py`: the calculation (no camera, no servos). `python obstacle.py` runs the self-test on the Mac or the Pi.
-- `depth_cam.py`: the camera program for steps 1 and 2.
+- `depth_cam.py`: the camera program (steps 1, 2 and 5).
+- `run_brain.py --depth`: the safety layer (`DepthGuard` in `obstacle.py`). run_brain sends the body pitch, leg height and head pitch to depth_cam on port 5801. depth_cam sends the free distance to run_brain on port 5800.
 - The numbers that are not measured yet: lens position (from the sim model, CAD S67), the 30 cm wide corridor, the 3 cm floor limit. Step 1 measures the lens height and tilt.

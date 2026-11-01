@@ -102,6 +102,8 @@ j = robot.read_joints()
 if j is None:
     raise SystemExit("A servo did not answer.")
 start, goal = j[0], brain.stand_hips(ctl.command[2])
+if HEAD_PITCH != 0.0:   # project servo rule: a new powered move gets a low torque cap (15 %, as servo_test.py)
+    robot.legs.write2(robot.id["head_pitch"], 0x30, 150)
 input("Hold the robot. The legs will move to the stand pose in 2 s. Press Enter.")
 for k in range(int(2.5 * hz)):
     want = start + (goal - start) * min(1.0, (k + 1) / (2 * hz))
@@ -227,6 +229,8 @@ except KeyboardInterrupt:
     pass
 finally:
     robot.stop(hips_off=True)
+    if HEAD_PITCH != 0.0:
+        robot.legs.write2(robot.id["head_pitch"], 0x30, 1000)   # torque cap back to normal (it is in RAM)
     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
     log.close()
     if fast:

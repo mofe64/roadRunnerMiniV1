@@ -5,10 +5,14 @@
   python3 depth_cam.py --watch --head-pitch 20   the same, head turned 20 deg nose down
   python3 depth_cam.py --watch --floor           robot off (not standing): measure the camera height and tilt
                                                   from the floor at the start and use them
+  python3 depth_cam.py --watch --floor --save    the same, and every 2 s save the camera picture with the
+                                                  obstacle points in red (logs/watch_cam.png, watch_depth.png/.npy)
+  python3 depth_cam.py --watch --robot           with run_brain.py --depth (second terminal): run_brain sends the
+                                                  body pitch, leg height and head pitch 50 times a second
 
 This program does not move a servo. The robot can be off (only the Pi and the camera need power).
 Put the robot on the floor with open floor in front of it (at least 1.5 m).
---watch also sends each result to 127.0.0.1 port 5800 (UDP, JSON) for a later run_brain.py safety layer.
+--watch also sends each result to 127.0.0.1 port 5800 (UDP, JSON) for the run_brain.py --depth safety layer.
 Needs: depthai 2.33.0.0 in .venv (see DEPTH.md). Depth: 640 x 400, 15 frames a second, extended disparity
 (the near limit is about 20 cm from the lens; without it, about 35 cm).
 """
@@ -16,13 +20,12 @@ import argparse, json, os, socket, sys, time, zlib, struct, warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)   # depthai 2.33: HIGH_DENSITY name
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
-from obstacle import Obstacles, camera_pose, fit_floor
+from obstacle import Obstacles, camera_pose, fit_floor, DEPTH_PORT, POSE_PORT
 
 W, H, FPS = 640, 400, 15
-PORT = 5800
 
 
-def make_pipeline(dai):
+def make_pipeline(dai, camera=False):
     p = dai.Pipeline()
     left, right = p.create(dai.node.MonoCamera), p.create(dai.node.MonoCamera)
     for cam, sock in ((left, dai.CameraBoardSocket.CAM_B), (right, dai.CameraBoardSocket.CAM_C)):
@@ -39,19 +42,39 @@ def make_pipeline(dai):
     left.out.link(st.left); right.out.link(st.right)
     xo = p.create(dai.node.XLinkOut); xo.setStreamName("depth")
     st.depth.link(xo.input)
+    if camera:                                        # the right camera picture, same view as the depth
+        xr = p.create(dai.node.XLinkOut); xr.setStreamName("rect")
+        st.rectifiedRight.link(xr.input)
     return p
 
 
-def save_png(path, depth_mm, far=3000):
-    """Grey picture: near = white, far or no depth = black. No extra packages."""
-    d = depth_mm.astype(np.float32)
-    g = np.where(d > 0, 255 * (1 - np.clip(d / far, 0, 1)), 0).astype(np.uint8)
+def write_png(path, img):
+    """img: (h, w) uint8 grey or (h, w, 3) uint8 colour. No extra packages."""
+    g = np.ascontiguousarray(img)
+    colour = 2 if g.ndim == 3 else 0
     raw = b"".join(b"\x00" + g[r].tobytes() for r in range(g.shape[0]))
     def chunk(t, data):
         return struct.pack(">I", len(data)) + t + data + struct.pack(">I", zlib.crc32(t + data) & 0xffffffff)
     with open(path, "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", g.shape[1], g.shape[0], 8, 0, 0, 0, 0))
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", g.shape[1], g.shape[0], 8, colour, 0, 0, 0))
                 + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def overlay(grey, obs):
+    """Camera picture in grey, obstacle points in the corridor RED, other obstacle points YELLOW."""
+    from obstacle import STEP
+    rgb = np.repeat(grey[:, :, None], 3, axis=2).copy()
+    h, w = grey.shape
+    for mask, colour in ((obs.side, (255, 210, 0)), (obs.solid, (255, 0, 0))):
+        big = np.repeat(np.repeat(mask, STEP, 0), STEP, 1)[:h, :w]
+        rgb[big] = colour
+    return rgb
+
+
+def save_png(path, depth_mm, far=3000):
+    """Grey depth picture: near = white, far or no depth = black."""
+    d = depth_mm.astype(np.float32)
+    write_png(path, np.where(d > 0, 255 * (1 - np.clip(d / far, 0, 1)), 0).astype(np.uint8))
 
 
 def main():
@@ -62,6 +85,10 @@ def main():
     ap.add_argument("--head-pitch", type=float, default=0.0, help="head pitch in deg, + = nose down")
     ap.add_argument("--floor", action="store_true", help="--watch: use the camera height and tilt from a floor fit "
                     "at the start (open floor in front), not the standing-robot model")
+    ap.add_argument("--robot", action="store_true", help="--watch: take the camera pose from run_brain.py --depth; "
+                    "no pose for 0.3 s = send nothing (run_brain then stops forward driving)")
+    ap.add_argument("--save", action="store_true", help="--watch: every 2 s save logs/watch_cam.png (camera picture, "
+                    "obstacle points red), logs/watch_depth.png and logs/watch_depth.npy")
     ap.add_argument("--seconds", type=float, default=10.0, help="--check: how long to count frames")
     args = ap.parse_args()
     if not (args.check or args.watch):
@@ -74,7 +101,7 @@ def main():
     if not dai.Device.getAllAvailableDevices():
         raise SystemExit("No OAK found. Check the USB-C cable (blue USB 3 port on the Pi) and the udev rule (DEPTH.md).")
 
-    with dai.Device(make_pipeline(dai)) as dev:
+    with dai.Device(make_pipeline(dai, camera=args.save and args.watch)) as dev:
         usb = dev.getUsbSpeed().name
         print(f"OAK connected: {dev.getDeviceName()}  USB {usb}")
         if usb not in ("SUPER", "SUPER_PLUS"):
@@ -130,15 +157,46 @@ def main():
                 raise SystemExit("Floor fit failed: put open floor in front of the camera and start again.")
             cam = (fl[0], camera_pose(leg, head)[1], fl[1])
             print(f"Using the floor fit: lens {fl[0] * 1000:.0f} mm above the floor, tilt {np.degrees(fl[1]):+.1f} deg")
+        qr = dev.getOutputQueue("rect", maxSize=1, blocking=False) if args.save else None
+        os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+        t_save = 0.0
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        pose_sock, pose, t_pose = None, None, -1e9
+        if args.robot:
+            pose_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            pose_sock.bind(("127.0.0.1", POSE_PORT))
+            pose_sock.setblocking(False)
+            print("Robot mode: start run_brain.py --depth in the other terminal.")
         print("Watching. Move your hand or a box in front of the robot. Ctrl+C = stop.")
         try:
             while True:
                 fr = q.get()
-                r = obs.find(fr.getFrame(), leg, head, cam=cam)
+                if pose_sock is not None:
+                    while True:
+                        try:
+                            pose, t_pose = json.loads(pose_sock.recv(4096)), time.monotonic()
+                        except BlockingIOError:
+                            break
+                        except (ValueError, OSError):
+                            continue
+                    if pose is None or time.monotonic() - t_pose > 0.3:
+                        print("\rwaiting for run_brain.py --depth (no robot pose)            ", end="", flush=True)
+                        continue                      # send nothing: run_brain allows no forward driving
+                    r = obs.find(fr.getFrame(), pose["leg"], pose["head"], pose["pitch"])
+                else:
+                    r = obs.find(fr.getFrame(), leg, head, cam=cam)
                 r["t"] = time.time()
                 r["age_ms"] = (dai.Clock.now() - fr.getTimestamp()).total_seconds() * 1000
-                sock.sendto(json.dumps(r).encode(), ("127.0.0.1", PORT))
+                sock.sendto(json.dumps(r).encode(), ("127.0.0.1", DEPTH_PORT))
+                if qr is not None and time.monotonic() - t_save > 2.0:
+                    rf = qr.tryGet()
+                    if rf is not None:
+                        t_save = time.monotonic()
+                        d = fr.getFrame()
+                        grey = np.asarray(rf.getFrame(), dtype=np.uint8).reshape(rf.getHeight(), rf.getWidth())
+                        write_png(os.path.join(HERE, "logs", "watch_cam.png"), overlay(grey, obs))
+                        save_png(os.path.join(HERE, "logs", "watch_depth.png"), d)
+                        np.save(os.path.join(HERE, "logs", "watch_depth.npy"), d)
                 bar = "#" * int(min(r["ahead"], 1.5) * 20)
                 zone = "STOP" if r["ahead"] < 0.30 else "SLOW" if r["ahead"] < 0.60 else "go  "
                 print(f"\r{zone} ahead {r['ahead'] * 100:4.0f} cm  left {r['left'] * 100:4.0f}  "
