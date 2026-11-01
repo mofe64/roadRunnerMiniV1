@@ -149,11 +149,20 @@ def main():
             return
 
         cam = None
+        os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
         if args.floor:
             for _ in range(10):                       # let the auto exposure settle
                 q.get()
-            fl = fit_floor(q.get().getFrame(), fx, fy, cx, cy)
+            d0 = q.get().getFrame()
+            fl = fit_floor(d0, fx, fy, cx, cy)
             if fl is None:
+                if args.save:                          # keep what the camera saw, so the cause can be found
+                    save_png(os.path.join(HERE, "logs", "watch_depth.png"), d0)
+                    np.save(os.path.join(HERE, "logs", "watch_depth.npy"), d0)
+                    rf = dev.getOutputQueue("rect", maxSize=1, blocking=True).get()
+                    write_png(os.path.join(HERE, "logs", "watch_cam.png"),
+                              np.asarray(rf.getFrame(), dtype=np.uint8).reshape(rf.getHeight(), rf.getWidth()))
+                    print("Saved logs/watch_cam.png, watch_depth.png and watch_depth.npy. Send them to Claude.")
                 raise SystemExit("Floor fit failed: put open floor in front of the camera and start again.")
             cam = (fl[0], camera_pose(leg, head)[1], fl[1])
             print(f"Using the floor fit: lens {fl[0] * 1000:.0f} mm above the floor, tilt {np.degrees(fl[1]):+.1f} deg")
