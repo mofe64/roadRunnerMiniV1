@@ -84,8 +84,10 @@ class Obstacles:
         return out
 
 
-def fit_floor(depth_mm, fx, fy, cx, cy, tries=200, seed=0):
+def fit_floor(depth_mm, fx, fy, cx, cy, tries=500, seed=0):
     """Fit the floor plane in the lower half of the image (robot still, open floor in front).
+    Only planes that look like a floor count: below the lens by 5-60 cm, tilt within +/-40 deg.
+    (Without this rule a wall or a box face can win: 2026-11-01 test gave lens -1535 mm, tilt -90 deg.)
     Returns (cam_h m, tilt rad, inlier share) or None. Use it to check camera_pose()."""
     hgt, wid = depth_mm.shape
     v, u = np.mgrid[hgt // 2:hgt:STEP, 0:wid:STEP]
@@ -95,23 +97,41 @@ def fit_floor(depth_mm, fx, fy, cx, cy, tries=200, seed=0):
         return None
     p = np.stack([(u[ok] - cx) / fx * z[ok], (v[ok] - cy) / fy * z[ok], z[ok]], 1)
     rng = np.random.default_rng(seed)
-    best, best_n = None, 0
+
+    def floor_like(n, d):
+        tilt = np.arctan2(n[2], n[1])
+        return 0.05 < d < 0.60 and abs(tilt) < np.radians(40)
+
+    best, best_n, best_score = None, 0, -np.inf
     for _ in range(tries):
         a, b, c = p[rng.choice(len(p), 3, replace=False)]
         n = np.cross(b - a, c - a)
         if np.linalg.norm(n) < 1e-9:
             continue
         n = n / np.linalg.norm(n)
-        inl = np.abs((p - a) @ n) < 0.01
-        if inl.sum() > best_n:
-            best, best_n = inl, inl.sum()
+        if n[1] < 0:
+            n = -n                                     # normal points down (camera y is down)
+        if not floor_like(n, a @ n):
+            continue
+        r = (p - a) @ n                                # + = beyond the plane (under the floor)
+        inl = np.abs(r) < 0.01
+        score = inl.sum() - 2 * (r > 0.03).sum()       # the camera cannot see points under the floor
+        if score > best_score:
+            best, best_n, best_score = inl, inl.sum(), score
+    if best is None or best_n < 0.25 * len(p):
+        return None                                    # too little floor in view
+    zs = p[best][:, 2]
+    if np.percentile(zs, 95) - np.percentile(zs, 5) < 0.4:
+        return None                                    # the floor patch is too short to give a good tilt
     q = p[best]
     centre = q.mean(0)
     n = np.linalg.svd(q - centre)[2][2]               # least-squares plane through the inliers
     if n[1] < 0:
-        n = -n                                         # normal points down (camera y is down)
+        n = -n
     cam_h = float(centre @ n)                          # lens to floor distance
     tilt = float(np.arctan2(n[2], n[1]))               # floor normal leans toward +z when looking down
+    if not floor_like(n, cam_h):
+        return None
     return cam_h, tilt, best_n / len(p)
 
 
@@ -160,4 +180,16 @@ if __name__ == "__main__":
         print(f"  floor fit: lens {fl[0] * 1000:.0f} mm, tilt {np.degrees(fl[1]):.1f} deg (true {cam_h * 1000:.0f}, "
               f"{np.degrees(tilt):.1f})")
         fails += abs(fl[0] - cam_h) > 0.002 or abs(fl[1] - tilt) > 0.005
+    # robot off (lens 141 mm, tilt 9.4 deg, as on 2026-11-01) with a box in front: the fit must find the
+    # floor (box at 0.8 m) or refuse (box at 0.35 m: too little floor), never return a wall
+    cam_h, tilt = 0.141, np.radians(9.4)
+    for f0, must in ((0.8, True), (0.35, False)):
+        img = _render(cam_h, tilt, fx, fy, cx, cy, W, H, [(f0, f0 + 0.3, -0.35, 0.35, 0.40)])
+        fl = fit_floor(img, fx, fy, cx, cy)
+        print(f"box {f0 * 100:.0f} cm in front of the lens, floor fit: "
+              f"{'refused' if fl is None else f'{fl[0] * 1000:.0f} mm, {np.degrees(fl[1]):.1f} deg'} (true 141, 9.4)")
+        if fl is None:
+            fails += must
+        else:
+            fails += abs(fl[0] - cam_h) > 0.005 or abs(fl[1] - tilt) > np.radians(1.5)
     print("SELF-TEST", "PASS" if not fails else f"FAIL ({fails})")
