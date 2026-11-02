@@ -29,6 +29,8 @@ ap.add_argument("--brain", default=os.path.join(HERE, "brains", "brain_drive_026
 ap.add_argument("--air", action="store_true", help="wheels in the air: no tip-over stop, no battery stop")
 ap.add_argument("--held", action="store_true")
 ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
+ap.add_argument("--freeze-front", action="store_true", help="test (Opus review O9, 2026-11-02): only the FRONT hips held at the stand pose")
+ap.add_argument("--freeze-rear", action="store_true", help="test (Opus review O9, 2026-11-02): only the REAR hips held at the stand pose")
 ap.add_argument("--gyro-lp", type=float, default=0.0, help="test (review 2026-11-01 step 0): low-pass the gyro the brain sees, cut-off in Hz (e.g. 6)")
 ap.add_argument("--fast-imu", action="store_true", help="also log the raw IMU about 200 times a second (logs/imu_<time>.csv)")
 ap.add_argument("--imu-tau", type=float, default=0.0, help="IMU filter time constant in s (default: the brain's, else 2.0)")
@@ -177,6 +179,10 @@ try:
         target, power, action = ctl.step(down, gyro_b, *j)
         if args.freeze_hips:
             target = ctl.hip_target = np.asarray(goal, dtype=float).copy()   # hips stay at the stand pose
+        elif args.freeze_front or args.freeze_rear:   # robot.HIPS order: front L, rear L, front R, rear R
+            held = [0, 2] if args.freeze_front else [1, 3]
+            target = np.asarray(target, dtype=float).copy(); target[held] = np.asarray(goal, dtype=float)[held]
+            ctl.hip_target = target.copy()
         robot.write_hips(target, head=HEAD)
         robot.write_wheels(power)
         t_write = time.perf_counter()
