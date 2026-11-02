@@ -27,6 +27,10 @@ STOP_CHANCE = 0.2         # some commands are "stand still"
 STOP_SECONDS = (4.0, 10.0)   # s: "stand still" lasts longer than the other commands, so a slow creep costs points (real drive_023 crept 1 cm/s, 2026-11-01)
 HEIGHT_RANGE = (0.080, 0.135)   # m: hip-to-axle height commands (legs can do 65-140 mm; keep a margin)
 HEIGHT_NORMAL = 0.120
+# Frozen-hip training games (drive_036, review F11): this share of games hold the hips at the 120 mm stand pose as
+# run_brain --freeze-hips does (the brain still sees its own action; ordinary speed/turn commands, height held at 120 mm).
+# A training mode only: the card sets freeze_hips itself. 0 = none (drive_035 and older were never trained frozen).
+FROZEN_SHARE = float(os.environ.get("FROZEN_SHARE", "0"))
 LAG_MAX = 0.25            # m: the "behind schedule" signal is capped at 25 cm
 HEADING_LAG_MAX = 0.5     # rad: the "off my heading" signal is capped at about 30 deg
 # Both signals slowly forget old errors (half gone after about 1.4 s), so they cannot get stuck at the cap
@@ -81,8 +85,8 @@ class DriveEnv(BalanceEnv):
             self.command = np.array([self.rng.uniform(-back, top), self.rng.uniform(-TURN_MAX, TURN_MAX), height])
         if "turn" not in DRIVE_PARTS:
             self.command[1] = 0.0
-        if "height" not in DRIVE_PARTS:
-            self.command[2] = HEIGHT_NORMAL
+        if "height" not in DRIVE_PARTS or getattr(self, "frozen_game", False):
+            self.command[2] = HEIGHT_NORMAL   # frozen game: the Pi ignores height changes while the hips are held
         hs, poses = self.pose_table
         self.stand_hips = np.array([np.interp(self.command[2], hs, poses[:, i]) for i in range(4)])
         every = STOP_SECONDS if self.command[0] == 0.0 and self.command[1] == 0.0 else NEW_COMMAND_EVERY
@@ -117,7 +121,7 @@ class DriveEnv(BalanceEnv):
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)
         gyro = self.sense_gyro(imu[3:] + self.noise("gyro", 3))
         hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)
-        hip_vel = d.qvel[self.hip_v] + self.noise("hip_vel", 4)
+        hip_vel = self.sense_hip_vel() + self.noise("hip_vel", 4)
         wheel_vel = self.sense_wheels() + self.noise("wheel_vel", 2)
         # "Behind schedule": how far the robot is behind (or ahead of) where the speed command would put it,
         # from the wheel speeds the servos report. Without it the brain only sees the speed NOW, so a robot
@@ -174,6 +178,8 @@ class DriveEnv(BalanceEnv):
         self.steps = 0
         self.stand_hips = self.stand_normal       # every game starts standing at 120 mm (the keyframe)
         super().reset(pitch)
+        self.frozen_game = FROZEN_SHARE > 0 and self.rng.random() < FROZEN_SHARE
+        self.freeze_hips = self.frozen_game       # the card and test scripts set freeze_hips again after reset
         self.height_offset = float(self.d.xpos[self.torso][2] - np.mean(self.d.xpos[self.axles, 2])) - HEIGHT_NORMAL
         self.new_command()
         return self.observe()
