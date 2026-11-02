@@ -31,6 +31,12 @@ HEIGHT_NORMAL = 0.120
 # run_brain --freeze-hips does (the brain still sees its own action; ordinary speed/turn commands, height held at 120 mm).
 # A training mode only: the card sets freeze_hips itself. 0 = none (drive_035 and older were never trained frozen).
 FROZEN_SHARE = float(os.environ.get("FROZEN_SHARE", "0"))
+# Stepped commands (drive_038, review 2026-11-02): the Pi gamepad and keys move the speed command in steps of
+# 0.05 m/s and the turn in steps of 0.25 rad/s, at most one step each 0.2 s (robot/gamepad.py SPEED_STEP,
+# TURN_STEP, STEP_EVERY). With CMD_STAIR=1 the training commands and the card do the same. Each step restarts
+# the lag signals, as robot/controller.py set_command does. 0 = the old instant jump (drive_037 and older).
+CMD_STAIR = int(os.environ.get("CMD_STAIR", "0"))
+SPEED_STEP, TURN_STEP, STEP_EVERY = 0.05, 0.25, int(0.2 * POLICY_HZ)
 LAG_MAX = 0.25            # m: the "behind schedule" signal is capped at 25 cm
 HEADING_LAG_MAX = 0.5     # rad: the "off my heading" signal is capped at about 30 deg
 # Both signals slowly forget old errors (half gone after about 1.4 s), so they cannot get stuck at the cap
@@ -72,6 +78,7 @@ class DriveEnv(BalanceEnv):
         self.stand_normal = self.stand_hips.copy()
 
     def new_command(self):
+        before = self.command.copy() if (getattr(self, "command", None) is not None and self.steps > 0) else None
         was_stop = getattr(self, "command", None) is not None and self.command[0] == 0.0
         top = SPEED_MAX_EASY + (SPEED_MAX - SPEED_MAX_EASY) * self.difficulty
         back = min(top, REVERSE_MAX)   # backwards is capped lower than forwards
@@ -91,6 +98,13 @@ class DriveEnv(BalanceEnv):
         self.stand_hips = np.array([np.interp(self.command[2], hs, poses[:, i]) for i in range(4)])
         every = STOP_SECONDS if self.command[0] == 0.0 and self.command[1] == 0.0 else NEW_COMMAND_EVERY
         self.next_command = self.steps + int(self.rng.uniform(*every) * POLICY_HZ)
+        if CMD_STAIR:                             # the stick moves now; the command follows in steps (step())
+            self.cmd_goal = self.command[:2].copy()
+            self.command[:2] = before[:2] if before is not None else 0.0
+            self.stair_next = self.steps
+            if before is not None and before[2] != self.command[2]:
+                self.lag = self.heading_lag = self.hold = 0.0   # a height change is a new command on the Pi too
+            return
         self.lag = self.heading_lag = 0.0         # a new command starts a new schedule
         if not (was_stop and self.command[0] == 0.0):
             self.hold = 0.0                       # "stand still" again after "stand still": keep counting (as on the Pi)
@@ -118,6 +132,8 @@ class DriveEnv(BalanceEnv):
         imu = np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]])   # IMU down through the Pi filter
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])
         imu = self.imu_history[self.imu_delay]
+        if getattr(self, "imu_age", 0.0) > 0.0:   # IMU sample age inside one decision (balance_env IMU_AGE_MS)
+            imu = (1.0 - self.imu_age) * imu + self.imu_age * self.imu_history[self.imu_delay + 1]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)
         gyro = self.sense_gyro(imu[3:] + self.noise("gyro", 3))
         hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)
@@ -187,6 +203,11 @@ class DriveEnv(BalanceEnv):
     def step(self, action):
         if self.steps >= self.next_command:
             self.new_command()
+        if CMD_STAIR and self.steps >= self.stair_next and not np.allclose(self.command[:2], self.cmd_goal):
+            self.command[0] = round(self.command[0] + float(np.clip(self.cmd_goal[0] - self.command[0], -SPEED_STEP, SPEED_STEP)), 3)
+            self.command[1] = round(self.command[1] + float(np.clip(self.cmd_goal[1] - self.command[1], -TURN_STEP, TURN_STEP)), 3)
+            self.lag = self.heading_lag = self.hold = 0.0   # controller.set_command: every change restarts the schedule
+            self.stair_next = self.steps + STEP_EVERY
         return super().step(action)
 
 
@@ -197,6 +218,8 @@ CARD = [(0.0, 0.0, 0.12, 60), (0.1, 0.0, 0.12, 10), (0.15, 0.0, 0.12, 10), (-0.1
         (0.15, 1.0, 0.12, 10), (-0.10, 1.0, 0.12, 10), (0.15, 0.0, 0.08, 10), (0.0, 1.5, 0.135, 10),
         (0.0, 0.0, 0.12, 60, "hard"), (0.0, 0.0, 0.12, 20, "frozen"),
         (0.0, 0.0, 0.12, 60, "stress"), (0.1, 0.0, 0.12, 20, "stress"), (0.15, 0.0, 0.12, 20, "stress")]
+if CMD_STAIR:   # with stepped commands, the old instant 0 -> 0.15 m/s jump stays on the card as a stress line
+    CARD.append((0.15, 0.0, 0.12, 10, "jump"))
 # "hard" line (review 2026-11-01): the robot most like the real one that buzzed: the softest hip flex
 # (10 Nm/rad, damping ratio 0.05), the lightest wheel rotor (x0.15 of 0.004), body inertia x0.5.
 # "frozen" line: hips held at the stand pose, wheels only (like the real test T2). The ratio d(wy)/d(wheel)
@@ -277,6 +300,7 @@ def card_line(job):
     hard = len(line) > 4 and "hard" in line[4]
     stress = len(line) > 4 and "stress" in line[4]
     freeze = len(line) > 4 and "frozen" in line[4]
+    jump = len(line) > 4 and "jump" in line[4]
     from stable_baselines3 import PPO
     model = PPO.load(path, device="cpu")
     env = DriveEnv(seed=seed, shoves=False)
@@ -295,6 +319,10 @@ def card_line(job):
         if stress:
             stress_plant(env)
         env.command = np.array([v, w, h]); env.next_command = 10 ** 9
+        if CMD_STAIR:   # start at 0 and step up to the line's command, as the gamepad does ("jump": all at once)
+            env.cmd_goal = np.array([v, w]); env.stair_next = 0
+            if not jump:
+                env.command[:2] = 0.0
         env.stand_hips = np.array([np.interp(h, hs, poses[:, i]) for i in range(4)])
         obs = env.observe()
         x0, far, peak, lim, n = float(np.mean(env.d.qpos[env.wheel_q])), 0.0, 0.0, 0, 0
@@ -346,7 +374,7 @@ def card_line(job):
             ok = (up == CARD_GAMES and g_rms < 0.3 and not buzzing(g_rms, share) and flips < 5 and np.mean(hip_mag) < 0.5
                   and np.max(creep) < 0.5 and np.mean(k[:, 0]) < 0.2 and np.mean(k[:, 1]) < 0.05 and np.max(k[:, 2]) <= 1.2)
             quality += "  MARKS " + ("PASS" if ok else "FAIL")
-    return (("  [HARD PLANT]" if hard else "") + ("  [STRESS]" if stress else "") + ("  [FROZEN HIPS]" if freeze else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
+    return (("  [HARD PLANT]" if hard else "") + ("  [STRESS]" if stress else "") + ("  [FROZEN HIPS]" if freeze else "") + ("  [JUMP]" if jump else "") + f"  command {v:+.2f} m/s, turn {w:+.1f} rad/s, height {h * 1000:.0f} mm, {seconds:2d} s: "
             f"stayed up {up}/{CARD_GAMES}, drove {np.mean(speeds):+.2f} m/s, turned {np.mean(turns):+.2f} rad/s, "
             f"height {np.mean(heights) * 1000:.0f} mm, legs differ {np.mean(uneven) * 1000:.1f} mm" + quality)
 

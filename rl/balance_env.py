@@ -77,7 +77,16 @@ GYRO_LP_RANGE = tuple(float(x) for x in os.environ.get("GYRO_LP_RANGE", "5,8").s
 # Wheel speed seen by the brain = position difference over one decision, as on the Pi (robot.read_joints).
 # Before: the instant speed. The two differ at 10 Hz (half a step late, smaller).
 WHEEL_POSDIFF = os.environ.get("WHEEL_POSDIFF", "1") == "1"
-HIP_VEL_LATE = int(os.environ.get("HIP_VEL_LATE", "0"))   # policy steps: the servo-reported hip speed is ~20 ms late against d(q)/dt (Fable F1, five runs, 2026-11-02); drive_035: 1
+HIP_VEL_LATE = int(os.environ.get("HIP_VEL_LATE", "0"))
+# Sense timing (drive_038, Fable F23, 2026-11-02). Measured on three robot logs: the servo speed register is a two-tap
+# backward difference, (q[k] - q[k-2]) / 40 ms (r 0.99). HIP_VEL_MODE=twotap gives the brain that, plus an extra hold of
+# HIP_VEL_HOLD decisions, drawn per game from the range (a fraction: interpolated between whole steps). Robot parity
+# (026, 031 and 037 free stands, 2026-11-02): hold 1 = the robot, so drive_038 trains on 1-2. IMU_AGE_MS: how old the IMU sample is at the read
+# (208 Hz sample age + LPF1 group delay + read, not fitted): per game, the brain sees the IMU this many ms late, between
+# the present and the previous decision's reading. Defaults = the drive_037 senses.
+HIP_VEL_MODE = os.environ.get("HIP_VEL_MODE", "")
+HIP_VEL_HOLD = tuple(float(x) for x in os.environ.get("HIP_VEL_HOLD", "0,0").split(","))
+IMU_AGE_MS = tuple(float(x) for x in os.environ.get("IMU_AGE_MS", "0,0").split(","))   # policy steps: the servo-reported hip speed is ~20 ms late against d(q)/dt (Fable F1, five runs, 2026-11-02); drive_035: 1
 WHEEL_COUNT = 2 * np.pi / 4096   # rad per servo position count (drive_034: the sim rounds wheel positions to counts, as the robot does)
 # Wheel motor rotor inertia (reflected, the "armature" 0.004 in the model) x this factor. With the SAME
 # measure as the Pi (position difference) the real floor fit is 310 x action - 32 x speed; the model at
@@ -236,6 +245,8 @@ class BalanceEnv:
         imu = np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]])
         self.imu_history = np.vstack([imu, self.imu_history[:-1]])        # newest first
         imu = self.imu_history[self.imu_delay]
+        if self.imu_age > 0.0:   # sample age inside one decision: between this reading and the one 20 ms before
+            imu = (1.0 - self.imu_age) * imu + self.imu_age * self.imu_history[self.imu_delay + 1]
         gravity = imu[:3] + self.gravity_bias + self.noise("gravity", 3)   # IMU: which way is down
         gyro = self.sense_gyro(imu[3:] + self.noise("gyro", 3))      # IMU: how fast the body is turning (low-passed)
         hip_pos = d.qpos[self.hip_q] + self.hip_offset - self.stand_hips + self.noise("hip_pos", 4)   # servo position feedback
@@ -266,6 +277,10 @@ class BalanceEnv:
     def sense_hip_vel(self):
         """Hip speeds the brain sees (rad/s). The servo reports them about 20 ms late (Fable F1): with HIP_VEL_LATE 1 the
         brain gets the speed from the start of this step, as on the robot."""
+        if HIP_VEL_MODE == "twotap":   # as the servo register: two-tap backward difference over 40 ms, held hip_vel_hold steps
+            i, f = int(self.hip_vel_hold), self.hip_vel_hold - int(self.hip_vel_hold)
+            tap = lambda k: (self.hip_q_hist[k] - self.hip_q_hist[k + 2]) * POLICY_HZ / 2.0
+            return tap(i) if f == 0.0 else (1.0 - f) * tap(i) + f * tap(i + 1)
         return self.d.qvel[self.hip_v].copy() if HIP_VEL_LATE == 0 else self.hip_vel_prev.copy()
 
     def sense_wheels(self):
@@ -368,6 +383,8 @@ class BalanceEnv:
         # how late commands and IMU readings arrive this game (the real delay is about the same every step)
         top = 0 if "delay" in ABLATE else int(round(MAX_DELAY * self.difficulty))
         self.imu_delay = rng.integers(0, top + 1)
+        self.imu_age = (0.0 if "delay" in ABLATE else rng.uniform(*IMU_AGE_MS) * self.difficulty) / 1000 * POLICY_HZ   # in decisions, 0..1
+        self.hip_vel_hold = float(rng.uniform(*HIP_VEL_HOLD))
         ms = 0.0 if "delay" in ABLATE else rng.uniform(*ACT_DELAY_MS) * self.difficulty
         self.act_delay = int(round(ms / 1000 / m.opt.timestep))   # in physics steps
 
@@ -379,6 +396,7 @@ class BalanceEnv:
             self.hip_offset, self.wheel_strength, self.gravity_bias = np.zeros(4), 1.0, np.zeros(3)
             self.wheel_deadband = WHEEL_DEADBAND
             self.act_delay = self.imu_delay = 0
+            self.imu_age, self.hip_vel_hold = 0.0, HIP_VEL_HOLD[0]
         mujoco.mj_resetDataKeyframe(m, d, self.key)
         # start a little different every game, so the policy learns to handle many situations
         if pitch is None:
@@ -400,7 +418,8 @@ class BalanceEnv:
         else:   # on the Pi the filter has settled while the robot was held still: start it at the true "down"
             self.down_filter.down = self.true_gravity()
             self.down_now = self.down_filter.down.copy()
-        self.imu_history = np.tile(np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 1, 1))
+        self.imu_history = np.tile(np.concatenate([self.down_now, d.sensordata[self.gyro:self.gyro + 3]]), (MAX_DELAY + 2, 1))
+        self.hip_q_hist = np.tile(d.qpos[self.hip_q], (int(np.ceil(max(HIP_VEL_HOLD))) + 4, 1))   # newest first, one row per decision
         self.hip_target = d.qpos[self.hip_q].copy()
         if self.gyro_lp is not None:
             self.gyro_lp.reset()
@@ -430,6 +449,7 @@ class BalanceEnv:
             mujoco.mj_step(self.m, self.d)
         self.d.xfrc_applied[self.torso, :] = 0
         self.down_now = self.sense_down()
+        self.hip_q_hist = np.vstack([self.d.qpos[self.hip_q], self.hip_q_hist[:-1]])
         reward, tilt = self.score(action)
         self.last_action = np.clip(action, -1, 1)
         self.steps += 1
