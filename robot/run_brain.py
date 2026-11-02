@@ -25,7 +25,7 @@ from controller import Controller
 from robot import Robot
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--brain", default=os.path.join(HERE, "brains", "brain_drive_026.npz"))   # working brain since 2026-11-01
+ap.add_argument("--brain", default=os.path.join(HERE, "brains", "brain_drive_039.npz"))   # working brain since 2026-11-02 (026 = backup)
 ap.add_argument("--air", action="store_true", help="wheels in the air: no tip-over stop, no battery stop")
 ap.add_argument("--held", action="store_true")
 ap.add_argument("--freeze-hips", action="store_true", help="test (review 2026-11-01 T2): hips HELD at the stand pose, the brain drives the wheels only")
