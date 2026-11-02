@@ -139,7 +139,7 @@ print("GO. Let go gently." if not (args.air or args.held) else "GO.")
 os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
 log_path = os.path.join(HERE, "logs", time.strftime("run_%Y%m%d_%H%M%S.csv"))
 log = open(log_path, "w")
-log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz,ax,ay,az,pad,ahead,limit,explore\n")
+log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz,ax,ay,az,pad,ahead,limit,explore,l1,l2,l3,l4,t1,t2,t3,t4\n")
 old_tty = termios.tcgetattr(sys.stdin); tty.setcbreak(sys.stdin.fileno())
 speed, turn, height = 0.0, 0.0, float(ctl.command[2])
 reason, volts, t0 = "q pressed", v0, time.perf_counter()
@@ -255,7 +255,8 @@ try:
                   (t_read - t_imu) * 1000, (t_write - t_read) * 1000, *down, *gyro, *j[0], *j[1], *j[2], *action,
                   *ctl.command, volts or 0, *gyro_b, *robot.imu.last_acc,
                   -1 if pad is None else int(pad.connected),
-                  -1 if guard is None or guard.ahead is None else guard.ahead, limit, ex_state]) + "\n")
+                  -1 if guard is None or guard.ahead is None else guard.ahead, limit, ex_state,
+                  *getattr(robot, "last_load", np.full(4, np.nan)), *target]) + "\n")
         prev = t_start
         next_t += dt
         if args.fast_imu:                         # use the idle part of the step: raw IMU every 5 ms

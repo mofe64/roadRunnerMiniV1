@@ -14,8 +14,8 @@ CONFIG = os.path.join(HERE, "config.json")
 HIPS = ["hip_f_L", "hip_r_L", "hip_f_R", "hip_r_R"]
 HEAD = ["head_yaw", "head_pitch"]
 WHEELS = ["wheel_L", "wheel_R"]
-DEFAULT_IDS = {"head_pitch": 1, "head_yaw": 2, "hip_f_L": 3, "hip_f_R": 4, "hip_r_L": 5, "hip_r_R": 6,
-               "wheel_L": 11, "wheel_R": 12}   # IDs chosen by Mofe, 2026-10-30
+DEFAULT_IDS = {"head_pitch": 1, "head_yaw": 2, "hip_f_L": 4, "hip_f_R": 3, "hip_r_L": 6, "hip_r_R": 5,
+               "wheel_L": 11, "wheel_R": 12}   # IDs chosen by Mofe; hips L/R swapped after the chassis rebuild, 2026-11-02
 RAD = 2 * np.pi / sts.COUNTS          # rad per count
 
 
@@ -98,9 +98,12 @@ class Robot:
     # ---------- sensors ----------
     def read_joints(self):
         """Hip angles (rad), hip speeds (rad/s), wheel speeds (rad/s, + = forward). None if a servo did not answer."""
-        r = self.legs.sync_read([self.id[n] for n in HIPS], sts.PRESENT_POS, 4)
+        r = self.legs.sync_read([self.id[n] for n in HIPS], sts.PRESENT_POS, 6)   # position, speed, load (0x38..0x3D)
         if len(r) < 4:
             return None
+        # present load, -1..+1 of the servo's top torque (bit 10 = direction), in the joint's + direction; log only (Opus O12)
+        self.last_load = np.array([self.sign[n] * sts.signed(r[self.id[n]][4] | (r[self.id[n]][5] << 8), 10) / 1000.0
+                                   if len(r[self.id[n]]) >= 6 else np.nan for n in HIPS])
         q = np.array([self.to_rad(n, r[self.id[n]][0] | (r[self.id[n]][1] << 8)) for n in HIPS])
         v = np.array([self.sign[n] * sts.signed(r[self.id[n]][2] | (r[self.id[n]][3] << 8)) * RAD for n in HIPS])
         w = self.wheels.sync_read([self.id[n] for n in WHEELS], sts.PRESENT_POS, 2)
