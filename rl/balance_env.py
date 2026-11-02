@@ -35,7 +35,13 @@ EPISODE_SECONDS = 10      # one game lasts at most 10 s
 SLOW_MOTION = 4          # the window plays 4x slower than real time
 FALL_TILT = np.radians(45)  # tilted more than this = fallen
 HIP_RANGE = 0.35          # rad: how far the policy may move each hip from the stand pose
-WHEEL_TORQUE = 1.85       # Nm: full wheel command (ST3215-HS at 11.1 V)
+# Measured wheel gain (Opus review O1, 2026-11-02, 6 robot logs): the real wheel is 1.15x the model, torque and no-load
+# speed together (like a higher voltage). WHEEL_GAIN scales WHEEL_TORQUE and the wheel ctrl/force ranges. Default 1.0.
+WHEEL_GAIN = float(os.environ.get("WHEEL_GAIN", "1.0"))
+WHEEL_TORQUE = 1.85 * WHEEL_GAIN   # Nm: full wheel command (ST3215-HS at 11.1 V)
+# Random spread of the torso centre of weight, forward/back (x), mm. 10 = the old +/-10 mm. drive_039: 2.5 around
+# TORSO_COM_X -12.5 mm (robot pose fit, Opus O1/O6). Sideways and up/down stay +/-10 mm.
+COM_DR_MM = float(os.environ.get("COM_DR_MM", "10"))
 WHEEL_FREE_SPEED = 10.3   # rad/s: wheel speed at full power with no load (11.1 V; bench test 5.76 at 6.2 V, from position)
 WHEEL_R = float(os.environ.get("WHEEL_R", "0.035"))   # m: wheel radius (set it to match MODEL_XML)
 # v2 training: make the game harder so the brain learns to cope
@@ -184,6 +190,8 @@ class BalanceEnv:
         self.wheel_act = [self.act_id[n] for n in WHEELS]
         self.hip_dof = list(self.hip_v)
         self.wheel_bl = [m.joint(n + "_backlash").id for n in WHEELS]   # gear slop joints behind the wheels
+        m.actuator_ctrlrange[self.wheel_act] *= WHEEL_GAIN      # the measured wheel gain needs room at full battery too
+        m.actuator_forcerange[self.wheel_act] *= WHEEL_GAIN
         m.body_ipos[self.torso][0] += TORSO_COM_X        # measured balance point (round 9); the +/-10 mm random spread is around this
         self.nominal = dict(mass=m.body_mass.copy(), ipos=m.body_ipos.copy(), friction=m.geom_friction.copy(),
                             gain=m.actuator_gainprm.copy(), bias=m.actuator_biasprm.copy(),
@@ -349,7 +357,7 @@ class BalanceEnv:
         m.body_mass[:] = nom["mass"] * (1 + r(-0.1, 0.1, m.nbody))               # every part +/-10 %
         m.body_mass[self.torso] += r(-0.1, 0.1)                                    # body +/-100 g (cables, glue, screws)
         m.body_ipos[:] = nom["ipos"]
-        m.body_ipos[self.torso] += r(-0.01, 0.01, 3)                              # centre of weight +/-10 mm
+        m.body_ipos[self.torso] += r(-0.01, 0.01, 3) * np.array([COM_DR_MM / 10.0, 1.0, 1.0])   # centre of weight: x +/-COM_DR_MM, y/z +/-10 mm
         m.geom_friction[:] = nom["friction"]
         m.geom_friction[self.tyres, 0] = 0.75 + r(-0.25, 0.25)                    # tyre-floor grip 0.5-1.0 (floor is 1.0 -> set to 0.5 in the model)
         k = nom["gain"][self.hip_act, 0] * (1 + r(-0.1, 0.1, 4))                  # servo stiffness +/-10 %
