@@ -6,8 +6,8 @@
   python3 run_brain.py --freeze-hips   test: hips held at the stand pose, the brain drives the wheels only
   python3 run_brain.py --freeze-hips --gyro-lp 6 --fast-imu   test step 0 (review 2026-11-01)
   python3 run_brain.py --pad       drive with the Bluetooth gamepad (controls in gamepad.py; q still stops)
-  python3 run_brain.py --depth     obstacle stop (DEPTH.md): first start `python3 depth_cam.py --watch --robot` in a
-                                   second terminal. Head 20 deg nose down. Forward speed falls below 60 cm, 0 below 30 cm
+  python3 run_brain.py --depth     obstacle stop (DEPTH.md): starts `depth_cam.py --watch --robot` by itself (output in
+                                   logs/depth_cam_<time>.log; --cam-separate = you run it in a second terminal). Head 20 deg nose down. Forward speed falls below 60 cm, 0 below 30 cm
   python3 run_brain.py --depth --pad   the same with the pad; RB = explore mode on/off (the robot drives by itself,
                                    turns away from obstacles). A, a stick move, or RB again = explore off. B = STOP.
 Keys (in this terminal): w/s faster/slower (0.05 m/s), a/d turn left/right (0.5 rad/s), r/f taller/lower (1 cm),
@@ -36,6 +36,7 @@ ap.add_argument("--fast-imu", action="store_true", help="also log the raw IMU ab
 ap.add_argument("--imu-tau", type=float, default=0.0, help="IMU filter time constant in s (default: the brain's, else 2.0)")
 ap.add_argument("--pad", action="store_true", help="drive with the Bluetooth gamepad (gamepad.py): sticks, A stand still, B stop")
 ap.add_argument("--depth", action="store_true", help="obstacle stop with the depth camera (DEPTH.md step 5)")
+ap.add_argument("--cam-separate", action="store_true", help="--depth: do not start depth_cam.py; you run it in a second terminal")
 ap.add_argument("--head-pitch", type=float, default=None, help="head pitch in deg, + = nose down (default 0; 20 with --depth)")
 ap.add_argument("--height", type=float, default=0.0, help="start height in mm (default: the brain's normal, 120); with --freeze-hips this is the held pose (review 9e: 90 mm test)")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
@@ -74,6 +75,17 @@ if args.pad:     # find the pad BEFORE any servo moves
         raise SystemExit(f"STOP: {e}")
     print(f"gamepad: {pad.name}. Left stick speed, right stick turn, D-pad height, A stand still, B STOP.")
 
+cam_proc = None
+def stop_cam():   # end the camera program that --depth started (no effect with --cam-separate)
+    if cam_proc is not None and cam_proc.poll() is None:
+        cam_proc.terminate()
+        try:
+            cam_proc.wait(timeout=3.0)
+        except Exception:
+            cam_proc.kill()
+import atexit
+atexit.register(stop_cam)   # also on an early STOP (battery, servo, tilt) before the main loop
+
 guard = None
 if args.depth:   # open the camera link BEFORE any servo moves
     from obstacle import DepthGuard
@@ -81,7 +93,29 @@ if args.depth:   # open the camera link BEFORE any servo moves
         guard = DepthGuard(float(brain.c["speed_max"]))
     except OSError as e:
         raise SystemExit(f"STOP: depth link: {e} (is another run_brain.py running?)")
-    print("depth: forward speed limited by the camera. depth_cam.py --watch --robot must run in a second terminal.")
+    if args.cam_separate:
+        print("depth: forward speed limited by the camera. depth_cam.py --watch --robot must run in a second terminal.")
+    else:   # start the camera program as a separate process (heavy work stays out of this 50 Hz loop)
+        import subprocess
+        os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+        cam_log_path = os.path.join(HERE, "logs", time.strftime("depth_cam_%Y%m%d_%H%M%S.log"))
+        cam_log = open(cam_log_path, "w")
+        cam_proc = subprocess.Popen([sys.executable, "-u", os.path.join(HERE, "depth_cam.py"), "--watch", "--robot"],
+                                    cwd=HERE, stdin=subprocess.DEVNULL, stdout=cam_log, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+        print("depth: starting the camera ...", end="", flush=True)
+        t_cam = time.monotonic()
+        while True:   # wait for the camera BEFORE any servo moves
+            with open(cam_log_path) as f:
+                cam_text = f.read()
+            if "OAK connected" in cam_text:
+                break
+            if cam_proc.poll() is not None or time.monotonic() - t_cam > 20.0:
+                stop_cam()
+                raise SystemExit("\nSTOP: the camera did not start. Last lines of " + cam_log_path + ":\n"
+                                 + "\n".join(cam_text.strip().splitlines()[-8:]))
+            time.sleep(0.2)
+        print(f" OK. Forward speed limited by the camera (camera log: {cam_log_path}).")
 explorer = None
 if guard is not None and pad is not None:
     from obstacle import Explorer
@@ -278,6 +312,7 @@ finally:
         robot.legs.write2(robot.id["head_pitch"], 0x30, 1000)   # torque cap back to normal (it is in RAM)
     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
     log.close()
+    stop_cam()
     if fast:
         imu_path = log_path.replace("run_", "imu_")
         np.savetxt(imu_path, np.array(fast), delimiter=",", header="t,wx,wy,wz,ax,ay,az", comments="", fmt="%.6g")

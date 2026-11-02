@@ -56,15 +56,17 @@ If you see `No OAK found`: check the cable and do item 3 again. If you see `not 
    - A cable on the floor: `go` (lower than 3 cm).
 
 ## Step 5: the robot stops for an obstacle
-Two programs run at the same time on the Pi. Open two SSH terminals (`ssh mofe@roadrunner-mini.local`), and in each do `cd ~/roadRunnerMiniV1/robot && source .venv/bin/activate`.
+Two programs run at the same time on the Pi: `run_brain.py` (balance, 50 times each second) and `depth_cam.py` (camera). They are two programs so that the camera work does not make the balance loop late. `run_brain.py --depth` starts `depth_cam.py --watch --robot` by itself, so you need only one terminal.
 
-1. Terminal 1: `python depth_cam.py --watch --robot`. It shows `waiting for run_brain.py --depth` until step 2 starts.
-2. Terminal 2: `python run_brain.py --depth` (add `--pad` for the gamepad). Do the usual start. In the stand move, the head turns 20 deg nose down.
-3. Test A (stand only, 30 s): do not drive. The robot must stand as well as before. Terminal 1 must show `go` with nothing in front.
-4. Test B (drive to a wall): put the robot 1.5 m from a wall or a big box, nose to the wall. Press `w` one time (0.05 m/s). The robot must stop about 20 cm from the wall. Terminal 2 shows `(camera: .. cm)` when the camera limits the speed.
+1. Open an SSH terminal (`ssh mofe@roadrunner-mini.local`) and do `cd ~/roadRunnerMiniV1/robot && source .venv/bin/activate`.
+2. Run `python run_brain.py --depth` (add `--pad` for the gamepad). It shows `depth: starting the camera ... OK` before any servo moves. If the camera does not start, it stops and shows the last lines of the camera log. Do the usual start. In the stand move, the head turns 20 deg nose down.
+3. Test A (stand only, 30 s): do not drive. The robot must stand as well as before. The camera output goes to `logs/depth_cam_<time>.log` (it must show `go` with nothing in front).
+
+To see the camera output live, use `--cam-separate`: run `python depth_cam.py --watch --robot` in a second terminal first, then `python run_brain.py --depth --cam-separate`.
+4. Test B (drive to a wall): put the robot 1.5 m from a wall or a big box, nose to the wall. Press `w` one time (0.05 m/s). The robot must stop about 20 cm from the wall. The terminal shows `(camera: .. cm)` when the camera limits the speed.
 5. Press `s` to drive back. Press `q` to stop.
 
-If the robot does not stop: press `q` (or B on the pad) at once. Send the two terminal outputs and the newest `logs/run_<time>.csv` to Claude (columns `ahead` and `limit` are at the end).
+If the robot does not stop: press `q` (or B on the pad) at once. Send the terminal output, the newest `logs/depth_cam_<time>.log` and the newest `logs/run_<time>.csv` to Claude (columns `ahead` and `limit` are at the end).
 
 ## Files
 - `obstacle.py`: the calculation (no camera, no servos). `python obstacle.py` runs the self-test on the Mac or the Pi.
