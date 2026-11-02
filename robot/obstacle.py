@@ -28,6 +28,8 @@ FLOOR_MARGIN = 0.03   # higher than 3 cm above the floor = obstacle (lower = flo
 MARGIN_PER_M = 0.03   # + 3 cm per metre of distance (stereo noise and IMU pitch error grow with distance)
 TOP_MARGIN = 0.10     # up to 10 cm above the camera (taller things also hit the head)
 HALF_WIDTH = 0.15     # corridor half width: robot about 0.18 m wide + 6 cm each side
+BIN_DEG = (-40, -30, -20, -10, 0, 10, 20, 30, 40)   # steering directions (deg, + = left) for the explore mode:
+                      # free distance along a robot-wide corridor in each direction (Vector Field Histogram idea)
 MAX_RANGE = 3.0       # m, ignore points farther than this (stereo noise grows with distance^2)
 MIN_POINTS = 15       # an obstacle needs this many points (after the 4x decimation): rejects speckle
 STEP = 4              # use every 4th pixel in x and y (640x400 -> 160x100)
@@ -91,12 +93,22 @@ class Obstacles:
                 out[name] = MAX_RANGE
             else:
                 out[name] = max(0.0, float(np.partition(r, MIN_POINTS - 1)[MIN_POINTS - 1]) - NOSE_X)
+        fs, ls = f[solid], l[solid]
+        bins = []
+        for deg in BIN_DEG:                              # corridor turned by deg about the wheel axle
+            c, s = np.cos(np.radians(deg)), np.sin(np.radians(deg))
+            fr, lr = fs * c + ls * s, -fs * s + ls * c
+            r = fr[(np.abs(lr) < HALF_WIDTH) & (fr > NOSE_X - 0.01)]
+            bins.append(MAX_RANGE if r.size < MIN_POINTS else
+                        max(0.0, float(np.partition(r, MIN_POINTS - 1)[MIN_POINTS - 1]) - NOSE_X))
         # Very close thing: many corridor pixels nearer than MIN_Z (the bottom-centre of the picture)
         hh, ww = self.near.shape
         box = self.near[hh // 2:, ww // 3: ww - ww // 3]
         out["near_share"] = float(box.mean()) if box.size else 0.0
         if out["near_share"] > NEAR_SHARE:
             out["ahead"] = 0.0
+            bins = [0.0 if abs(d) <= 10 else b for d, b in zip(BIN_DEG, bins)]
+        out["bins"] = [round(b, 3) for b in bins]
         return out
 
 
@@ -111,7 +123,7 @@ class DepthGuard:
     Reverse and turn are never limited. The limit goes DOWN at once and UP only after it stayed higher
     for `up_s` s (the depth noise must not make the command jump: each new command restarts the brain's
     lag signals). Speeds snap to `step` (0.05 m/s = one w key press) for the same reason."""
-    def __init__(self, speed_max, slow=0.40, stop=0.20, stale=0.3, step=0.05, up_s=0.5, port=DEPTH_PORT):
+    def __init__(self, speed_max, slow=0.35, stop=0.15, stale=0.3, step=0.05, up_s=0.5, port=DEPTH_PORT):
         import socket
         self.speed_max, self.slow, self.stop, self.stale, self.step, self.up_s = speed_max, slow, stop, stale, step, up_s
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -119,6 +131,7 @@ class DepthGuard:
         self.sock.setblocking(False)
         self.pose = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ahead, self.left, self.right = None, None, None
+        self.bins, self.bins_recent = None, []   # free distance per BIN_DEG direction (median of the last 3)
         self.recent, self.ahead_raw = [], None   # one bad depth frame (2026-11-01 run: 3 m -> 0.11 m for 1 frame) is ignored
         self.t_msg, self.limit, self.t_higher = -1e9, 0.0, None
         self.fresh = False
@@ -144,6 +157,9 @@ class DepthGuard:
             self.recent = (self.recent + [float(msg["ahead"])])[-3:]
             self.ahead, self.t_msg = float(np.median(self.recent)), now    # median of the last 3 frames
             self.ahead_raw = self.recent[-1]
+            if "bins" in msg:
+                self.bins_recent = (self.bins_recent + [np.asarray(msg["bins"], float)])[-3:]
+                self.bins = np.median(np.array(self.bins_recent), axis=0)
             self.left, self.right = float(msg.get("left", 0.0)), float(msg.get("right", 0.0))
         self.fresh = now - self.t_msg < self.stale
         want = self.raw_limit(self.ahead if self.fresh else None)
@@ -173,55 +189,88 @@ class DepthGuard:
 
 
 class Explorer:
-    """Autonomous explore mode (RB on the pad, run_brain.py --depth --pad). A simple rule, no map:
-      FORWARD: drive at FWD while the way ahead is free (>= TURN_AT from the nose).
-      TURN:    stop and turn on the spot to the side with more free space (left or right sector), until
-               the way ahead is free for CLEAR_AT and at least MIN_TURN_S passed. After MAX_TURN_S, try the
-               other side once; after that, give up: stand still and leave explore mode.
+    """Autonomous explore mode (RB on the pad, run_brain.py --depth --pad): smooth steering, a Vector Field
+    Histogram (VFH) style rule (Borenstein & Koren 1991), no map.
+      Each camera result gives the free distance in 9 directions (BIN_DEG, -40..+40 deg), each a robot-wide corridor.
+      STEER: drive on and turn toward the free direction (>= PASS) nearest to straight ahead, with a little
+             preference for the last direction (no left-right dithering). Speed falls as the way ahead gets
+             shorter: FWD when >= SLOW_AT, half when >= CREEP_AT, else turn on the spot toward that direction.
+      TURN:  no direction is free: turn on the spot to the side with more room until straight ahead is free for
+             CLEAR_AT and MIN_TURN_S passed. After MAX_TURN_S try the other side once; then stand still, explore OFF.
       No camera data: stand still (the DepthGuard also blocks forward driving).
-    The DepthGuard limit still applies on top. Speeds are pad/key steps (0.05 m/s, 0.25 rad/s)."""
-    FWD, TURN = 0.10, 0.50            # m/s, rad/s (0.5 rad/s on the spot: it fell once on 2026-11-01, watch it)
-    TURN_AT, CLEAR_AT = 0.35, 0.60    # m from the nose (indoor: Mofe 2026-11-01)
+    Commands use the brain's steps (0.05 m/s, 0.25 rad/s) and change at most every HOLD_S (slowing down: at once):
+    the brain was trained with step commands, and each change restarts its lag signals."""
+    FWD, TURN = 0.10, 0.50            # m/s, rad/s
+    PASS = 0.40                       # m: a direction is free when its corridor is free this far (from the nose)
+    SLOW_AT, CREEP_AT = 0.60, 0.30    # m ahead: full speed / half speed / turn on the spot
+    CLEAR_AT = 0.60                   # m ahead: TURN ends
+    HOLD_S = 0.4                      # s, shortest time between two command changes
     MIN_TURN_S, MAX_TURN_S = 1.0, 12.0
 
     def __init__(self):
         self.on = False
         self.state, self.t_state, self.dir, self.tries = "forward", 0.0, 1.0, 0
+        self.last, self.t_change, self.goal = (0.0, 0.0), -1e9, 0.0
 
     def start(self, now):
         self.on, self.state, self.t_state, self.tries = True, "forward", now, 0
+        self.last, self.t_change, self.goal = (0.0, 0.0), -1e9, 0.0
 
     def stop(self):
         self.on = False
+
+    def _out(self, v, w, now, note=""):
+        """Hold the last command for HOLD_S; a lower speed is used at once (safety)."""
+        if (v, w) != self.last and (now - self.t_change >= self.HOLD_S or v < self.last[0]):
+            self.last, self.t_change = (v, w), now
+        return self.last[0], self.last[1], note
 
     def command(self, guard, now):
         """(speed, turn, note). note: a short text when the state changes, else ''."""
         if not self.on:
             return 0.0, 0.0, ""
-        if not guard.fresh or guard.ahead is None:
+        bins = getattr(guard, "bins", None)
+        if not guard.fresh or guard.ahead is None or bins is None:
+            self.last, self.t_change = (0.0, 0.0), now
             return 0.0, 0.0, ""
+        deg = np.array(BIN_DEG, float); d = np.asarray(bins, float)
+        ahead = min(guard.ahead, float(d[deg == 0][0]))
         note = ""
-        if self.state == "forward":
-            if guard.ahead < self.TURN_AT:
-                self.state, self.t_state, self.tries = "turn", now, 0
-                self.dir = 1.0 if (guard.left or 0) >= (guard.right or 0) else -1.0     # + turn = left
-                note = f"obstacle at {guard.ahead * 100:.0f} cm: turn {'left' if self.dir > 0 else 'right'}"
-            else:
-                return self.FWD, 0.0, ""
         if self.state == "turn":
             t = now - self.t_state
-            if guard.ahead >= self.CLEAR_AT and t >= self.MIN_TURN_S:
-                self.state, self.t_state = "forward", now
-                return self.FWD, 0.0, "way clear: forward"
-            if t > self.MAX_TURN_S:
+            if ahead >= self.CLEAR_AT and t >= self.MIN_TURN_S:
+                self.state, self.t_state, self.goal = "forward", now, 0.0
+                note = "way clear: drive on"
+            elif t > self.MAX_TURN_S:
                 if self.tries == 0:
                     self.tries, self.t_state, self.dir = 1, now, -self.dir
-                    note = "no free way: try the other side"
-                else:
-                    self.on = False
-                    return 0.0, 0.0, "no free way found: explore OFF, standing still"
-            return 0.0, self.TURN * self.dir, note
-        return 0.0, 0.0, note
+                    return self._out(0.0, self.TURN * self.dir, now, "no free way: try the other side")
+                self.on = False
+                return 0.0, 0.0, "no free way found: explore OFF, standing still"
+            else:
+                return self._out(0.0, self.TURN * self.dir, now)
+        free = d >= self.PASS
+        if not free.any():
+            self.state, self.t_state, self.tries = "turn", now, 0
+            self.dir = 1.0 if d[deg > 0].sum() >= d[deg < 0].sum() else -1.0      # + turn = left
+            return self._out(0.0, self.TURN * self.dir, now,
+                             f"boxed in ({ahead * 100:.0f} cm ahead): turn {'left' if self.dir > 0 else 'right'}")
+        # nearest to straight ahead, a little stickiness, and +40 deg per m that a direction is short of 1 m:
+        # an obstacle 0.5 m ahead already moves the path 10-20 deg to the side (smooth blend, no late swerve)
+        cost = np.abs(deg) + 0.5 * np.abs(deg - self.goal) + 40.0 * np.maximum(0.0, 1.0 - d)
+        cost[~free] = np.inf
+        goal = float(deg[np.argmin(cost)])
+        if np.sign(goal) != np.sign(self.goal) and goal != 0:
+            note = f"steer {'left' if goal > 0 else 'right'} ({ahead * 100:.0f} cm ahead)"
+        self.goal = goal
+        w = 0.0 if abs(goal) < 10 else (0.25 if abs(goal) < 30 else self.TURN) * np.sign(goal)
+        if ahead >= self.SLOW_AT:
+            v = self.FWD
+        elif ahead >= self.CREEP_AT:
+            v = 0.05
+        else:
+            v, w = 0.0, self.TURN * (np.sign(goal) if goal != 0 else self.dir)
+        return self._out(v, float(w), now, note)
 
 
 def fit_floor(depth_mm, fx, fy, cx, cy, tries=500, seed=0):
@@ -352,17 +401,30 @@ if __name__ == "__main__":
         got = g.update(t)
         fails += abs(got - want) > 1e-9
         print(f"guard t {t:.2f} s ahead {ahead} -> limit {got:.2f} (want {want:.2f})")
-    # Explorer: forward, obstacle -> turn to the open side, clear -> forward; no data -> still
+    # Explorer (VFH steering). bins = free distance for BIN_DEG -40..+40 (+ = left)
     class G: pass
     g, ex = G(), Explorer()
-    ex.TURN_AT, ex.CLEAR_AT = 0.60, 1.00                 # test numbers (logic test)
     ex.start(0.0)
-    steps = [(0.0, 2.0, 1.0, 0.5, True, (0.10, 0.0)), (1.0, 0.5, 0.4, 1.2, True, (0.0, -0.5)),
-             (1.5, 1.5, 0.4, 1.2, True, (0.0, -0.5)), (2.2, 1.5, 0.4, 1.2, True, (0.10, 0.0)),
-             (3.0, 1.5, 0.4, 1.2, False, (0.0, 0.0))]
-    for t, ahead, left, right, fresh, want in steps:
-        g.ahead, g.left, g.right, g.fresh = ahead, left, right, fresh
+    open_ = [3.0] * 9
+    box_r = [0.3, 0.3, 0.35, 0.45, 0.5, 1.2, 3.0, 3.0, 3.0]     # box ahead-right, open left
+    steps = [(0.0, open_, True, (0.10, 0.0)),              # open room: straight on
+             (1.0, box_r, True, (0.05, 0.25)),             # box 50 cm ahead: slower, bend left (no stop)
+             (1.1, open_, True, (0.05, 0.25)),             # held for HOLD_S (no dithering)
+             (1.6, open_, True, (0.10, 0.0)),              # clear again: straight on
+             (2.2, [0.2, 0.2, 0.25, 0.2, 0.2, 0.3, 0.3, 0.35, 0.3], True, (0.0, 0.5)),   # boxed in: turn on the spot, left
+             (2.5, [0.2] * 9, True, (0.0, 0.5)),           # keeps turning
+             (3.5, open_, True, (0.10, 0.0)),              # clear after MIN_TURN_S: drive on
+             (4.0, open_, False, (0.0, 0.0))]              # no camera: stand still
+    for t, bins, fresh, want in steps:
+        g.bins, g.fresh = bins, fresh
+        g.ahead = bins[4]
         v, w, note = ex.command(g, t)
         fails += abs(v - want[0]) > 1e-9 or abs(w - want[1]) > 1e-9
-        print(f"explore t {t:.1f} ahead {ahead} -> speed {v:+.2f} turn {w:+.2f} {note}")
+        print(f"explore t {t:.1f} ahead {bins[4]:.2f} -> speed {v:+.2f} turn {w:+.2f} (want {want[0]:+.2f} {want[1]:+.2f}) {note}")
+    # bins from a rendered box ahead-right: the right/centre directions are short, the left ones are free
+    head = np.radians(20); cam_h, lens_f, tilt = camera_pose(leg, head)
+    f0 = NOSE_X + 0.5 - lens_f
+    r = obs.find(_render(cam_h, tilt, fx, fy, cx, cy, W, H, [(f0, f0 + 0.2, -0.35, 0.05, 0.3)]), leg, head)
+    print("bins for a box 50 cm ahead-right:", " ".join(f"{dd:+d}:{b:.2f}" for dd, b in zip(BIN_DEG, r["bins"])))
+    fails += not (r["bins"][4] < 0.6 and r["bins"][1] < 0.6 and r["bins"][7] > 1.0)
     print("SELF-TEST", "PASS" if not fails else f"FAIL ({fails})")
