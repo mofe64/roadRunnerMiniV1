@@ -35,6 +35,7 @@ ap.add_argument("--imu-tau", type=float, default=0.0, help="IMU filter time cons
 ap.add_argument("--pad", action="store_true", help="drive with the Bluetooth gamepad (gamepad.py): sticks, A stand still, B stop")
 ap.add_argument("--depth", action="store_true", help="obstacle stop with the depth camera (DEPTH.md step 5)")
 ap.add_argument("--head-pitch", type=float, default=None, help="head pitch in deg, + = nose down (default 0; 20 with --depth)")
+ap.add_argument("--height", type=float, default=0.0, help="start height in mm (default: the brain's normal, 120); with --freeze-hips this is the held pose (review 9e: 90 mm test)")
 ap.add_argument("--bench-power", action="store_true", help="wheels bus on the 6 V bench adapter: no battery stop")
 args = ap.parse_args()
 
@@ -88,6 +89,9 @@ HEAD_PITCH = np.radians(args.head_pitch if args.head_pitch is not None else (20.
 HEAD = (0.0, HEAD_PITCH)      # (yaw, pitch); set once in the stand move, never changed while balancing
 
 ctl = Controller(brain)
+if args.height > 0:   # start (and, with --freeze-hips, hold) at this height
+    lo, hi = [float(x) for x in brain.c["height_range"]]
+    ctl.set_command(0.0, 0.0, float(np.clip(args.height / 1000.0, lo, hi)))
 hz = float(brain.c["policy_hz"]); dt = 1.0 / hz
 robot = Robot()
 if float(brain.c.get("imu_tau", 0)) > 0:      # brains from drive_028 on were trained with the Pi IMU filter at this time constant
@@ -135,7 +139,7 @@ log_path = os.path.join(HERE, "logs", time.strftime("run_%Y%m%d_%H%M%S.csv"))
 log = open(log_path, "w")
 log.write("t,loop_ms,imu_ms,read_ms,write_ms,gx,gy,gz,wx,wy,wz,q1,q2,q3,q4,v1,v2,v3,v4,wl,wr,a1,a2,a3,a4,cmd_v,cmd_w,cmd_h,volts,bwx,bwy,bwz,ax,ay,az,pad,ahead,limit,explore\n")
 old_tty = termios.tcgetattr(sys.stdin); tty.setcbreak(sys.stdin.fileno())
-speed, turn, height = 0.0, 0.0, float(brain.c["height_normal"])
+speed, turn, height = 0.0, 0.0, float(ctl.command[2])
 reason, volts, t0 = "q pressed", v0, time.perf_counter()
 ctl.reset(robot.read_joints()[0])
 hip_bad = 0

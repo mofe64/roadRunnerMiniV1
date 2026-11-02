@@ -283,6 +283,7 @@ def card_line(job):
     calm = []                                               # body pitch rms (deg), wheel travel rms (rad), last 5 s (review round 8d)
     for _ in range(CARD_GAMES):
         obs = env.reset(pitch=env.rng.uniform(-0.035, 0.035))
+        env.freeze_hips = freeze   # hips held at the stand pose as on the Pi; the brain sees its own action (review round 9)
         if hard:
             hard_plant(env)
         if stress:
@@ -294,8 +295,6 @@ def card_line(job):
         G, A, W, PT = [], [], [], []
         while True:
             action = model.predict(obs, deterministic=True)[0]
-            if freeze:
-                action = np.concatenate([np.zeros(len(action) - 2), action[-2:]])   # hips stay at the stand pose
             obs, r, fell, timeup, info = env.step(action)
             far = max(far, abs(float(np.mean(env.d.qpos[env.wheel_q])) - x0) * WHEEL_R)   # m from the start
             peak = max(peak, float(np.max(np.abs(env.d.qvel[env.wheel_v]))))

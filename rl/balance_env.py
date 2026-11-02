@@ -105,6 +105,7 @@ NOISE = dict(gravity=0.005,     # IMU "down" jitter: 0.3 deg per reading
              hip_vel=0.3,       # rad/s
              wheel_vel=0.5)     # rad/s
 GRAVITY_BIAS = 0.035            # IMU mounted slightly crooked: up to 2 deg, the same for the whole game (real vs sim balance pitch differ 1.4 deg, review round 5)
+TORSO_COM_X = float(os.environ.get("TORSO_COM_X", "0.0"))   # m: body centre of weight shift. Default 0 = CAD (drive_031). -0.008 = drive_032 trial (fitted from logs of a robot with a broken chassis: PARKED, review 9e)
 NOISE = {k: v * float(os.environ.get("NOISE_SCALE", "1.0")) for k, v in NOISE.items()}
 
 # Experiments: ABLATE=hips,wheelgear,backlash,hipspeed turns parts of the v3 servo model OFF, and
@@ -169,6 +170,7 @@ class BalanceEnv:
         self.wheel_act = [self.act_id[n] for n in WHEELS]
         self.hip_dof = list(self.hip_v)
         self.wheel_bl = [m.joint(n + "_backlash").id for n in WHEELS]   # gear slop joints behind the wheels
+        m.body_ipos[self.torso][0] += TORSO_COM_X        # measured balance point (round 9); the +/-10 mm random spread is around this
         self.nominal = dict(mass=m.body_mass.copy(), ipos=m.body_ipos.copy(), friction=m.geom_friction.copy(),
                             gain=m.actuator_gainprm.copy(), bias=m.actuator_biasprm.copy(),
                             frictionloss=m.dof_frictionloss.copy(), armature=m.dof_armature.copy(),
@@ -282,6 +284,8 @@ class BalanceEnv:
         if self.realism and "hipspeed" not in ABLATE:   # the servo cannot move faster than its top speed
             step = min(HIP_MAX_SPEED, HIP_SLEW) / POLICY_HZ
             target = np.clip(target, self.hip_target - step, self.hip_target + step)
+        if getattr(self, "freeze_hips", False):        # test as on the Pi (run_brain --freeze-hips): hips held, the brain still sees its own action
+            target = self.stand_hips - self.hip_offset
         self.hip_target = target
         for i, n in enumerate(HIPS):
             self.d.ctrl[self.act_id[n]] = target[i]                          # hip target angle
