@@ -9,7 +9,7 @@ Hobby / open-source wheeled biped: self-balance, obstacle avoidance, fall recove
 - Neck: standard pan-tilt. Yaw STS3215 stands on the lid (M2 countersunk from inside the lid); printed U-bracket on its horn carries the pitch STS3215; the head rides on the pitch horn and idler.
 - Head: printed box 95.5 x 100 x 65 mm, open bottom, OAK-D Lite on ledges held by two M4 screws into its back holes (75 mm apart), visor opening at the front.
 - Wheels: Waveshare ST3215-HS bus servos in motor mode, Pololu 70 x 8 mm wheels.
-- Power: 3S 5200 mAh LiPo, 10 A blade fuse, UBEC 7.4 V for the leg and head servo bus (bus adapter 1), UBEC 5.2 V for the Pi 5. The 2 wheel servos (ST3215-HS) are on their own bus (bus adapter 2). Adapter 2 gets battery voltage after the fuse. Do not connect the two servo buses together. The battery voltage can damage the 7.4 V STS3215 servos.
+- Power: 3S 5200 mAh LiPo, 10 A blade fuse, UBEC 5.2 V for the Pi 5. Since 2026-11-06 the leg and head servos are the 12 V STS3215 (ST-3215-C018), so both servo buses get battery voltage after the fuse: bus adapter 1 for the legs and head, bus adapter 2 for the 2 wheel servos (ST3215-HS). The 7.4 V UBEC is removed. Before 2026-11-06 the 7.4 V STS3215 had its own 7.4 V UBEC and must not get battery voltage.
 
 ## Verified numbers (Fusion "Biped v0.1" design, saved state v0.2 S51, archive biped_v02_S40.f3d)
 - Mass 1476 g: body 983, head 203 (ribs fused to the roof + side webs, S43), neck 66, each leg 40, each wheel+servo 72. COM 27 mm above the hip axes, 1 mm ahead.

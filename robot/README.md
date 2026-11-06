@@ -16,7 +16,7 @@ These files run the trained driving brain on the Raspberry Pi 5, 50 decisions ea
 
 ## Wiring summary
 - IMU (Adafruit LSM6DS3TR-C) to the Pi 5 header: VIN to pin 1 (3.3 V), GND to pin 6, SDA to pin 3, SCL to pin 5. Lead shorter than 20 cm. Board flat on the upper deck, X arrow to the nose. The Pico stays unwired.
-- Bus adapter 1 (legs and head, 7.4 V UBEC) and bus adapter 2 (wheels, battery voltage after the fuse): each adapter has a USB cable to the Pi. Set each adapter switch to USB. Do not connect the two servo buses together.
+- Bus adapter 1 (legs and head) and bus adapter 2 (wheels). Both get battery voltage after the fuse (12 V STS3215 since 2026-11-06): each adapter has a USB cable to the Pi. Set each adapter switch to USB. Do not connect the two servo buses together.
 
 ## Setup on the Pi (one time)
 1. Turn on I2C: add this line to `/boot/firmware/config.txt`, then restart the Pi:

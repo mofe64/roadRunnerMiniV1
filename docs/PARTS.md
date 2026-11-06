@@ -5,13 +5,13 @@ This document is written in ASD-STE100 Simplified Technical English.
 ## Parts that we have
 - Raspberry Pi 5 with active cooler.
 - Luxonis OAK-D Lite (with IMU).
-- Feetech STS3215 servo, 7.4 V, quantity 6: 4 for the hips, 1 for head pitch, 1 for head yaw.
+- Feetech STS3215 servo, 12 V version (30 kg.cm, ST-3215-C018), quantity 6: 4 for the hips, 1 for head pitch, 1 for head yaw.
 - Pololu 1425 wheel, 70 x 8 mm, quantity 2.
 - 3S LiPo battery, 5200 mAh, 277 g, 135.6 x 43.5 x 22.1 mm.
-- Nuofany 8 A UBEC, quantity 2.
+- Nuofany 8 A UBEC, quantity 1, set to 5.2 V for the Pi 5. (2026-11-06: the second UBEC, 7.4 V for the servo bus, is removed. The 12 V servos get battery voltage.)
 - Raspberry Pi Pico 2 W (spare, not fitted: the IMU connects to the Pi).
 - Adafruit LSM6DS3TR-C IMU.
-- Waveshare Bus Servo Adapter (A), quantity 2 (Mofe has both). Adapter 1: legs and head on the 7.4 V UBEC. Adapter 2: wheel servos on battery voltage. Adapter 2 is not in the CAD. Put it inside the body on the tray floor. Wrap it in heat-shrink or Kapton tape and hold it with a zip-tie or foam tape.
+- Waveshare Bus Servo Adapter (A), quantity 2 (Mofe has both). Adapter 1: legs and head. Adapter 2: wheel servos. Both adapters get battery voltage after the fuse. Adapter 2 is not in the CAD. Put it inside the body on the tray floor. Wrap it in heat-shrink or Kapton tape and hold it with a zip-tie or foam tape.
 - XT60 connectors.
 - 2 eye LEDs with resistors.
 

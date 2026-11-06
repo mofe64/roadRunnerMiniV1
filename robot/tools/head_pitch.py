@@ -7,7 +7,7 @@ Only the head PITCH servo gets torque. Head yaw, hips and wheels stay limp (yaw 
 encoder seam: it is not moved). Safety (as servo_test.py): torque limit 15 % (register 0x30), slow speed,
 steps of 1 deg every 0.05 s, and torque off at once if the servo moves the wrong way. The target count must
 stay inside 100..3995 (no seam crossing). Press Enter (or Ctrl+C) to end: torque off, the head goes limp.
-The 7.4 V servo bus needs power (battery on). run_brain.py must NOT run at the same time.
+The legs servo bus needs power (battery on). run_brain.py must NOT run at the same time.
 """
 import sys
 import time

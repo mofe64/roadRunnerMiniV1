@@ -13,7 +13,7 @@ The design is similar to Upkie, Diablo, TITA and Ascento.
 ## Main parts
 - Computer: Raspberry Pi 5.
 - Camera: Luxonis OAK-D Lite (depth camera, RGB camera and IMU).
-- Leg and head servos: Feetech STS3215 (7.4 V), quantity 6.
+- Leg and head servos: Feetech STS3215 12 V version (30 kg.cm, ST-3215-C018), quantity 6. They run directly on battery voltage.
 - Wheel servos: Waveshare ST3215-HS, quantity 2.
 - Battery: 3S LiPo, 5200 mAh.
 
