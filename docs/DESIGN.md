@@ -146,3 +146,22 @@ Open points:
 Files: biped_v02_S68.f3d/.step, stl/chassis_lower.stl, plates/plate_5a_chassis_lower.3mf (same settings: floor down, no supports, 5 mm outer brim), renders_s68/ (also in renders/), scripts/s68_hip_wall_fix.py, s68b_counterbore_webs.py, s68c_counterbore_fin.py, s68_thin_wall_scan.py, s68_export.py, s68_renders.py. STL volume 56,187.4 mm3 (Fusion 56,161.7 mm3, +0.046 %). Plate 5b and all other plates did not change.
 
 S68d (2026-11-01, after the independent re-check): the real STS3215 socket recess is at x +/-36.5..41.5, z -9.5..9.5. The 7 x 9 mm cable slots (z +/-4.5) were too short, so a plug or lead above or below z +/-4.5 hit the wall. Each slot is now x +/-37.6..44.6, z -9.0..9.0, through the wall. It joins the block pocket. It is 1.5 mm from the x +/-33.3 counterbores. Checked: one solid, 55,272.6 mm3, 68.5 g, PLA; no overlap with the 32 hip servo bodies; guard OK. Saved as Fusion version 98. STL volume 55,298.4 mm3 (+0.047 %). plates/plate_5a_chassis_lower.3mf rebuilt with the same settings (script: scripts/s68d_cable_slot_tall.py).
+
+## S69 (2026-11-04): base openings for hip screw access
+- Reason: Mofe's note of 2026-11-02. The hip screws near the base (z +10.2) are hard to reach.
+- Change: 2 rectangular openings through the base over the spine hollow, x +/-26..59.9, y +/-11.2, roof z 11.4..14.4. They have the same width as the spine opening. The middle 52 mm stays solid because it ties the spine walls.
+- Comparison (voxel FEA, 1 mm, comparison only): 1 long opening gave 2.0 to 2.4 times the wall flex and 1.3 to 1.6 times the stress. 2 openings gave 1.1 to 1.2 times the flex and 1.05 to 1.1 times the stress. Peak stress across the print layers did not rise.
+- Tool: the screw axes are sideways and the gap between the walls is 22.4 mm, so a straight screwdriver does not fit. A 1.5 mm ball-end hex driver reaches all 8 screws at 15 to 30 degrees tilt with the upper chassis off. L-key swing (long leg 25 to 40 mm): x +/-33.4 screws 270 to 330 degrees (was 140 to 190), x +/-57.8 screws 200 degrees (was 100).
+- Result: chassis_lower 50,744.0 mm3, 62.92 g solid in Fusion (was 68.54 g), 1 lump, 1 shell, no overlap with any body. First layer 11,415 mm2 (was 12,934). No new width under 1.6 mm in the layer map.
+- The battery rests on a 10.55 mm ledge on each side of the openings.
+- Fusion v99. Files: biped_v02_S69.f3d/.step, stl/chassis_lower.stl, plates/plate_5a_chassis_lower.3mf (same settings), renders_s69/, scripts/s69_base_openings.py.
+
+## S70 (2026-11-04): tray front joint, round deck pockets, adapter post base
+- Reason: Mofe's review. The tray had screws only at the rear (the old battery door bosses). The 4 deck end pockets were 4 x 4 mm square. The bus adapter post at (-22.5, 6.5) sat on 2 vents and the end of a zip-tie slot.
+- Tray front joint: chassis_upper pads x 70..72.5, y +/-24..34, z 14.4..37 on the front posts, 0.5 mm from the tray. Insert holes 4.0 mm, x 64..72.5, y +/-29, z 25. Tray front wall holes 3.5 mm, same y and z. Fasteners: 2 x M3 x 8 into 2 x M3 x 5 x 4 heat-set inserts.
+- Deck pockets: round 4.0 mm, x +/-66..72.8, y +/-23, z 65. Same axis as the lid side holes.
+- Adapter post: vents (-26, 6) and (-20, 6) filled, r 3.5 disc under the post, ring restored, pilot r 1 from z 61. Plastic under the post at z 62.5: 5.8 -> 16.5 mm2, same as the other 3. The zip-tie slot is now x -18.6..-12.
+- Result: 1 lump, 1 shell, PLA for all 3 bodies. chassis_upper 55,344.6 mm3, 68.63 g. tray 74,985.2 mm3, 92.98 g. upper_deck 26,030.1 mm3, 32.28 g (solid masses in Fusion). No overlap with any of the 544 bodies, except the 4 hip plug keep-outs and the tray (3.68 mm3 each, as before S65). Tray to chassis_upper 0.50 mm. Modelled M3 x 8 screws: no overlap. Drop path 0..80 mm: no overlap. Screw head to the nearest leg part: 48 mm in the current pose. Upper links stay at |y| 49.5 or more, and the head is at |y| 31.75 or less.
+- Slice: plate 5b 87.7 g, 4 h 50 min. Plate 6 31.5 g, 1 h 5 min, no supports. Plate 7 96.6 g, 4 h 28 min. The settings in the 3 files did not change; only the meshes and face counts changed.
+- Fusion v100. Files: biped_v02_S70.f3d/.step, stl/chassis_upper.stl, stl/upper_deck.stl, stl/tray.stl, plates/plate_5b_chassis_upper.3mf, plates/plate_6_upper_deck.3mf, plates/plate_7_tray.3mf, renders_s70/, scripts/s70_tray_front_joint_deck.py, scripts/s70_export.py.
+

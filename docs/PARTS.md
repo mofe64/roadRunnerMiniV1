@@ -38,7 +38,7 @@ All fasteners come from the button-head screw kit or from the servo bags. You do
 | Pitch bracket to the yaw servo horn | M3 x 8 button head (used by Mofe, 2026-10-28) |
 | Pi 5 | M2 x 8 button head, into 1.8 mm pilot holes |
 | Bus servo adapter 1 and IMU (upper deck) | M2 x 6, into the 2.0 mm pilot holes (used by Mofe, 2026-10-30) |
-| Upper deck, lid and battery door | M3 x 8, into M3 x 5 x 4 heat-set inserts (18 inserts: 10, plus 4 in the deck tab pockets for the 4 lid side screws, plus 4 in the chassis corner posts for the chassis joint (S63). Push the 4 pocket inserts in before assembly. An M3 nut does not fit.) |
+| Upper deck, lid and battery door | M3 x 8, into M3 x 5 x 4 heat-set inserts (20 inserts: 10, plus 4 in the deck tab pockets for the 4 lid side screws, plus 4 in the chassis corner posts for the chassis joint (S63), plus 2 in the front pads for the tray (S70). Push the 4 pocket inserts in before assembly. An M3 nut does not fit.) |
 | Leg link pivots (knees) | M3 x 16, a 1 mm washer between the links, one nut, threadlocker on the screw tip |
 | Wheel to hub | M3 x 12, into 2 heat-set inserts in each hub |
 | OAK-D Lite rear holes | M4 x 10 with a washer |
