@@ -2,7 +2,7 @@
 
 The packet format is the Feetech STS protocol, the same as in ../spinup_test.py and ../wheel_bench.py.
 One USB adapter = one bus. The robot has two buses that must never be joined:
-  bus "legs":   battery voltage, hips and head (STS3215 12 V)
+  bus "legs":   7.4 V from UBEC 2, hips and head (STS3215 7.4 V)
   bus "wheels": battery voltage, the 2 wheel servos (ST3215-HS)
 """
 import glob

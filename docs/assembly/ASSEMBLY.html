@@ -62,44 +62,35 @@ html{scroll-behavior:smooth}
 
 <div class="wrap">
 <header style="display:grid;gap:10px">
-  <span class="eyebrow">Road Runner mini · v0.2 S64 · assembly</span>
+  <span class="eyebrow">Road Runner Mini · design state S72 · assembly</span>
   <h1>Assemble the wheeled biped</h1>
-  <p class="lede">Do the steps in this order. Each step has a picture from the CAD model. I checked each screw length against the model (Fusion "v0.2 S64", version 91), and not only against the old documents. Ask questions in the thread at any step.</p>
+  <p class="lede">Do the steps in this sequence. Each step has a picture from the CAD model. The screw lengths agree with the CAD model.</p>
   <div class="legend"><span><span class="sw" style="background:var(--m3)"></span>Red screw = M3</span><span><span class="sw" style="background:var(--m2)"></span>Blue screw = M2</span><span><span class="sw" style="background:#1e88e5;border-radius:50%"></span>Blue disc = 1 mm washer</span><span><span class="sw" style="background:#c9a227"></span>Gold = heat-set insert</span></div>
 </header>
 
 <nav aria-label="Steps"><ol id="toc"></ol></nav>
 
-<section class="box">
-  <h2>Changes from PRINT.md</h2>
-  <ul class="plain">
-    <li><b>Wheel to hub:</b> use <span class="m3">M3 x 12</span>, not M3 x 8. The wheel is 7.75 mm thick at the screw holes. An M3 x 8 goes only 0.25 mm into the insert. An M3 x 12 goes through the full 4 mm insert and stops 1.3 mm before the bottom of the hole.</li>
-    <li><b>Knees:</b> use <span class="m3">M3 x 16</span>. PARTS.md says M3 x 12, and that is wrong. The stack is 6 + 1 + 6 = 13 mm.</li>
-    <li><b>Pitch servo in the bracket:</b> use the <span class="m2">M2 x 6</span> screws from the servo bag. The arm is 2 mm thick, so an M2 x 8 goes 6 mm into the servo. The holes in the servo model are only 2 to 3 mm deep.</li>
-    <li><b>Hip servos before the tray.</b> The hip screws go in from under the spine. When the tray is on, its floor closes that space.</li>
-  </ul>
-</section>
-
 <section class="box" id="parts">
   <h2>Screws and tools</h2>
-  <p>Count your screws before you start. Your kit list shows about 30 x M3 x 8. This build uses 58.</p>
+  <p>Count your screws before you start.</p>
   <div class="tbl"><table>
     <thead><tr><th>Fastener</th><th>Qty</th><th>Where</th></tr></thead>
     <tbody>
       <tr><td><span class="m3">M3 x 8</span> button head</td><td class="n">60</td><td>chassis joint 4, tray rear 2, tray front 2, upper deck 4, lid sides 4, upper links 16, rear links 8, hubs 8, bracket base 4, head 8</td></tr>
       <tr><td><span class="m3">M3 x 12</span> button head</td><td class="n">4</td><td>wheels to hubs (2 per wheel)</td></tr>
-      <tr><td><span class="m3">M3 x 16</span> + M3 nut</td><td class="n">4</td><td>knees, with threadlocker on the screw tip</td></tr>
+      <tr><td><span class="m3">M3 x 16</span> + M3 nyloc nut</td><td class="n">4</td><td>knees, with threadlocker on the screw tip</td></tr>
       <tr><td>M3 washer, 1 mm</td><td class="n">28</td><td>upper links 16, rear links 8 (necessary), knees 4 (between the links)</td></tr>
-      <tr><td><span class="m2">M2 x 8</span> button head</td><td class="n">24</td><td>hip servos 16, front plates to wheel servos 4, Pi 4.</td></tr>
-      <tr><td><span class="m2">M2 x 6</span></td><td class="n">6</td><td>bus adapter 1 and the IMU on the upper deck (Mofe used these, 30 Oct)</td></tr>
+      <tr><td><span class="m2">M2 x 8</span> button head</td><td class="n">28</td><td>hip servos 16, front plates to wheel servos 4, Pi 4, IMU plate 4</td></tr>
+      <tr><td><span class="m2">M2 x 6</span></td><td class="n">10</td><td>bus servo adapters 8 (upper deck), IMU 2 (IMU plate)</td></tr>
       <tr><td>M2 washer</td><td class="n">16</td><td>hip servos</td></tr>
       <tr><td><span class="m2">M2 x 6</span> pointed (servo bag)</td><td class="n">12</td><td>yaw servo to lid 4, pitch servo in bracket 8</td></tr>
       <tr><td>M4 x 10 + washer</td><td class="n">2</td><td>OAK-D Lite</td></tr>
       <tr><td>M3 x 5 x 4 heat-set insert</td><td class="n">20</td><td>chassis upper 12, upper deck end pockets 4, hubs 4</td></tr>
+      <tr><td>Zip tie, 2.5 mm x 150 mm</td><td class="n">6</td><td>UBECs 4, fuse holder 2</td></tr>
       <tr><td>Horn centre screws</td><td class="n">—</td><td>from the servo bags</td></tr>
     </tbody>
   </table></div>
-  <p><b>Tools:</b> soldering iron for the inserts, hex keys for M2 and M3 button heads (an L-key for M2 is necessary inside the spine), small Phillips screwdriver for the servo-bag screws, threadlocker, zip ties, a small piece of Blu Tack to hold screws on the key.</p>
+  <p><b>Tools:</b> soldering iron for the inserts, hex keys for M2 and M3 button heads (an L-key for M2 is necessary inside the spine), small Phillips screwdriver for the servo-bag screws, threadlocker, double-sided foam tape, a small piece of Blu Tack to hold screws on the key.</p>
 </section>
 
 <div id="steps" style="display:grid;gap:40px">
@@ -108,9 +99,9 @@ html{scroll-behavior:smooth}
   <div class="stephead"><span class="num">1</span><h2>Push in the heat-set inserts</h2></div>
   <figure><img src="img/s01_inserts.jpg" alt="Chassis upper from below with insert positions"></figure>
     <ol class="do">
-    <li>Chassis upper: push 4 inserts into the bottoms of the 4 corner posts. (You did this.)</li>
+    <li>Chassis upper: push 4 inserts into the bottoms of the 4 corner posts.</li>
     <li>Chassis upper: push 4 inserts into the tops of the 4 deck columns.</li>
-    <li>Chassis upper: push 2 inserts into the 2 rear door bosses, from the rear face.</li>
+    <li>Chassis upper: push 2 inserts into the 2 rear bosses, from the rear face.</li>
     <li>Chassis upper: push 2 inserts into the 2 front pads, from the front face.</li>
     <li>Upper deck: push 1 insert into each of the 4 end pockets, from the end face (2 at the front, 2 at the rear). An M3 nut does not fit there.</li>
     <li>Hubs: push 2 inserts into each hub, from the flange face (the face that goes against the wheel). Use the 2 larger holes (4.0 mm) on the centre line, above and below the centre hole. Do not use the 4 smaller holes (3.5 mm). They are for the horn screws.</li>
@@ -134,11 +125,11 @@ html{scroll-behavior:smooth}
   <figure><img src="img/s03_hips.jpg" alt="Hip servos on the spine, screws from inside the spine"></figure>
   <div class="warn"><b>Caution</b><span>Do this before the tray. You cannot reach these screws after the tray is on.</span></div>
   <ol class="do">
-    <li>Set the servo IDs first, one servo at a time, with <code>robot/tools/setup_ids.py</code>: head pitch 1, head yaw 2, hip front-left 3, hip front-right 4, hip rear-left 5, hip rear-right 6, wheel left 11, wheel right 12. Put a tape label on each servo.</li>
-    <li>Keep the horn on each hip servo, with its centre screw tight. Since S65 the tray has open slots, so the body goes into the tray with the horns on.</li>
+    <li>Set the servo IDs first, one servo at a time, with <code>robot/tools/setup_ids.py</code>: head pitch 1, head yaw 2, hip front-left 4, hip front-right 3, hip rear-left 6, hip rear-right 5, wheel left 11, wheel right 12. Put a tape label on each servo.</li>
+    <li>Keep the horn on each hip servo, with its centre screw tight. The tray has open slots, so the body goes into the tray with the horns on.</li>
     <li>Plug the bus cable into the servo before you fit it. The sockets are on the back face, and they go into the pocket in the spine wall.</li>
     <li>Put the servo against the spine wall. The back face must sit flat on the 4 pads. The idler disc goes into the round hole in the wall.</li>
-    <li>From inside the spine, put 4 x <span class="m2">M2 x 8</span> with a washer through the wall into the servo. Use the L-key from below or from the open ends. The upper screw heads go into the small pockets in the spine roof.</li>
+    <li>From inside the spine, put 4 x <span class="m2">M2 x 8</span> with a washer through the wall into the servo. Use the 1.5 mm L-key or a 1.5 mm ball-end hex driver from below. For the screws near the floor, go through the 2 openings in the floor. The upper screw heads go into the small pockets in the spine roof.</li>
     <li>Turn each screw by hand at the end. Stop when the head touches the washer. If a screw stops before that, do not force it. Put one more washer under it.</li>
     <li>Do the same for all 4 servos (16 screws).</li>
   </ol>
@@ -147,29 +138,27 @@ html{scroll-behavior:smooth}
 
 <section class="step" id="s4">
   <div class="stephead"><span class="num">4</span><h2>Put the power parts in the side bays</h2></div>
-  <figure><img src="img/s06_power.jpg" alt="Power parts in the side bays, battery coming in from the rear (picture shows the fuse holder in the bay; since S66 it goes outside the tray)"></figure>
+  <figure><img src="img/s06_power.jpg" alt="Power parts in the side bays, battery coming in from the rear. The picture shows the fuse holder in the bay, but it goes on the outside of the tray."></figure>
   <ol class="do">
     <li>Do this before the tray. The tray closes the side bays.</li>
     <li>Put the XT60 splice in the right side bay. Attach it with zip ties through the slots in the battery cradle wall.</li>
     <li>The fuse holder does not fit in the left side bay. It goes on the outside of the tray left wall in step 5. Leave its wires long enough to go out through the rear-left slot.</li>
-    <li>If you use the second bus adapter (wheel servos), decide its place now. PARTS.md says to put it on the tray floor, insulated, with tape or a zip tie.</li>
-    <li>Leave the wires long. The model does not show cable routes. Route them in step 10 and step 14.</li>
+    <li>Leave the wires long. The model does not show cable routes. Route them in step 11 and step 17.</li>
   </ol>
 </section>
 
 <section class="step" id="s5">
   <div class="stephead"><span class="num">5</span><h2>Lower the body into the tray</h2></div>
-  <figure><img src="img/s04_tray.jpg" alt="Body with hip servos above the tray (picture shows the older tray with closed windows)"></figure>
-  <div class="warn"><b>Caution</b><span>Use the new tray: plate 7 from 30 October (S66), with the 4 slots open to the top edge and 4 small zip-tie holes in the left centre post. The first printed tray (closed windows) does not fit the body.</span></div>
+  <figure><img src="img/s04_tray.jpg" alt="Body with hip servos above the tray. The picture shows closed windows, but the tray has slots that are open to the top edge."></figure>
   <ol class="do">
     <li>Keep the 4 hip horns on.</li>
     <li>Hold the body level over the tray, with the front of the body over the front of the tray.</li>
     <li>Align each hip servo with its slot. Each servo and its horn go down through the slot.</li>
     <li>Lower the body straight down until the chassis sits on the tray floor. Do not push the tray walls.</li>
-    <li>Put 2 x <span class="m3">M3 x 8</span> through the 2 holes in the tray rear wall into the door-boss inserts. Put 2 more through the 2 holes in the tray front wall into the front pad inserts.</li>
-    <li><b>Fuse holder:</b> put it on the outside of the left tray wall, on the centre post between the 2 left slots, lying front to back with the cap up. Put 2 zip ties through the 4 small holes (one tie through the front pair, one through the rear pair) and round the holder. Run its wires in through the rear-left slot.</li>
+    <li>Put 2 x <span class="m3">M3 x 8</span> through the 2 holes in the tray rear wall into the rear boss inserts. Put 2 more through the 2 holes in the tray front wall into the front pad inserts.</li>
+    <li><b>Fuse holder:</b> put it on the outside of the left tray wall, on the centre post between the 2 left slots. Its long side points front to back and its cap points up. Put 2 zip ties through the 4 small holes (one tie through the front pair, one through the rear pair) and round the holder. Run its wires in through the rear-left slot.</li>
   </ol>
-  <p class="note">In the model the body goes straight down with no contact. The smallest gaps are 1.0 mm from each horn disc to the slot edge and 0.5 mm from each servo case to the slot. If it binds, stop and tell me. Inside the wall, each zip tie passes in a 2.0 mm gap between the tray wall and the chassis (a tie is 1.2 mm thick). If a tie does not go through with the body in the tray, put both ties through the holes before you lower the body, and close them after.</p>
+  <p class="note">In the model the body goes straight down with no contact. The smallest gaps are 1.0 mm from each horn disc to the slot edge and 0.5 mm from each servo case to the slot. If the body does not go down freely, stop and find the cause. Do not use force. Inside the wall, each zip tie passes in a 2.0 mm gap between the tray wall and the chassis (a tie is 1.2 mm thick). If a tie does not go through with the body in the tray, lift the body out. Put both ties through the holes. Lower the body again. Then close the ties.</p>
 </section>
 
 <section class="step" id="s6">
@@ -210,7 +199,7 @@ html{scroll-behavior:smooth}
     <li>Put each upper link on its hip horn: the front links on the front servos and the rear links on the rear servos. The knee boss goes to the inside.</li>
     <li>Put 4 x <span class="m3">M3 x 8</span> + 1 mm washer through each link into the horn (16 screws).</li>
     <li>Front knee: upper front link to the front plate of the wheel unit. Rear knee: upper rear link to the rear link of the wheel unit.</li>
-    <li>For each knee, put an <span class="m3">M3 x 16</span> from the inside (the upper link side). Put a washer between the two links. Put one nut on the outside.</li>
+    <li>For each knee, put an <span class="m3">M3 x 16</span> from the inside (the upper link side). Put a washer between the two links. Put one nyloc nut on the outside.</li>
   </ol>
   <figure><img src="img/k01_knee.jpg" alt="Knee stack from inside to outside: M3 x 16 screw, upper link, 1 mm washer, lower part, nut"></figure>
   <ol class="do" start="5">
@@ -222,28 +211,46 @@ html{scroll-behavior:smooth}
 
 <section class="step" id="s9">
   <div class="stephead"><span class="num">9</span><h2>Fit the Pi 5</h2></div>
-  <figure><img src="img/s07_pi.jpg" alt="Pi 5 and Pico above the chassis deck floor"></figure>
+  <figure><img src="img/s07_pi.jpg" alt="Pi 5 above the lower deck. The picture also shows a Pico board, which this robot does not use."></figure>
   <ol class="do">
-    <li>Slide the battery in through the rear door. Hold it with tape or a strap for now. The battery door cover is not designed yet.</li>
+    <li>Slide the battery in from the rear. Hold it with tape or a strap. The robot has no battery door cover.</li>
     <li>Pi 5: put 4 x <span class="m2">M2 x 8</span> through the board into the 4 pilot holes. The screws cut their own thread.</li>
-    <li>Pico: do not fit it. This build does not use the Pico. The IMU connects to the Pi, and the Pi reads the battery voltage from the wheel servos. Keep the Pico as a spare. The 4 small bosses stay empty. (The picture still shows the Pico.)</li>
+    <li>Do not install the small board that the picture shows at the front of the deck. Its 4 posts hold the IMU plate (step 10).</li>
   </ol>
+</section>
+
+<section class="step" id="s9b">
+  <div class="stephead"><span class="num">10</span><h2>Fit the IMU plate and the IMU</h2></div>
+  <figure><img src="img/s09b_imu_plate.jpg" alt="IMU plate on the 4 posts at the front of the lower deck, with the IMU on its 2 posts"></figure>
+  <div class="warn"><b>Caution</b><span>Do this before the upper deck. You cannot reach the IMU after the upper deck is on.</span></div>
+  <ol class="do">
+    <li>Put the IMU plate on the 4 posts at the front of the lower deck. The 2 small posts point up. The tongue points to the front.</li>
+    <li>Put 4 x <span class="m2">M2 x 8</span> through the plate into the 4 posts.</li>
+    <li>Put the IMU on the 2 small posts. The X arrow on the board points to the nose of the robot.</li>
+    <li>Put 2 x <span class="m2">M2 x 6</span> through the board into the posts.</li>
+    <li>Connect the STEMMA QT cable to the rear socket of the IMU. Connect the other end to the Pi: red to pin 1 (3.3 V), black to pin 6 (GND), blue to pin 3 (SDA), yellow to pin 5 (SCL).</li>
+  </ol>
+  <p class="check"><b>Check:</b> the IMU board is level and does not move.</p>
 </section>
 
 <section class="step" id="s10">
-  <div class="stephead"><span class="num">10</span><h2>Fit the upper deck</h2></div>
-  <figure><img src="img/s08_deck.jpg" alt="Upper deck with UBECs above the columns"></figure>
+  <div class="stephead"><span class="num">11</span><h2>Fit the upper deck</h2></div>
+  <figure><img src="img/s08_deck.jpg" alt="Upper deck from the front right: 2 bus servo adapters at the rear, the cable channel, 2 UBECs with zip ties at the front"></figure>
   <ol class="do">
-    <li>Connect the power and the cables that go under the deck first.</li>
-    <li>Put the deck on the 4 columns. Put 4 x <span class="m3">M3 x 8</span> through the deck into the column inserts.</li>
-    <li>Attach the 2 UBECs with foam tape or zip ties. They have no screw holes.</li>
-    <li>Put the 7.4 V UBEC about 10 mm further to the rear than in the picture. In the model it sits over the yaw servo plug window.</li>
-    <li>Bus adapter 1 and the IMU: use <span class="m2">M2 x 6</span> into the 2.0 mm deck pilots. Mofe used these on 30 October and they hold.</li>
+    <li>Connect the cables that go below the deck first.</li>
+    <li>Put the deck on the 4 columns. The 8 small posts go to the rear. Put 4 x <span class="m3">M3 x 8</span> through the deck into the column inserts.</li>
+    <li>Bus servo adapter 1 (leg and head servos): put it on the 4 posts at the rear left. The edge with the USB-C socket points to the front. Put in 4 x <span class="m2">M2 x 6</span>.</li>
+    <li>Bus servo adapter 2 (wheel servos): put it on the 4 posts at the rear right in the same direction. Put in 4 x <span class="m2">M2 x 6</span>.</li>
+    <li>UBEC 1 (5.2 V, Pi): put foam tape below it. Put it at the front right, between the tie slots. Put 2 zip ties (150 mm) through the deck slots and over the UBEC.</li>
+    <li>UBEC 2 (7.4 V, leg and head servos): do the same at the front left.</li>
+    <li>Put the USB cables and the power wires of the adapters in the open channel between the adapters and the UBECs.</li>
+    <li>Make sure that the zip ties below the deck do not push on the IMU or on the Pi cooler.</li>
   </ol>
+  <p class="check"><b>Check:</b> each adapter board is on its 4 posts and does not move. Each UBEC does not move.</p>
 </section>
 
 <section class="step" id="s11">
-  <div class="stephead"><span class="num">11</span><h2>Yaw servo on the lid</h2></div>
+  <div class="stephead"><span class="num">12</span><h2>Yaw servo on the lid</h2></div>
   <figure><img src="img/s11_yaw.jpg" alt="Yaw servo above the lid, screws from inside the lid"></figure>
   <ol class="do">
     <li>Keep the lid off the body.</li>
@@ -254,16 +261,16 @@ html{scroll-behavior:smooth}
 </section>
 
 <section class="step" id="s12">
-  <div class="stephead"><span class="num">12</span><h2>Bracket on the yaw horn</h2></div>
+  <div class="stephead"><span class="num">13</span><h2>Bracket on the yaw horn</h2></div>
   <figure><img src="img/s12_bracket.jpg" alt="Pitch bracket above the yaw servo horn"></figure>
   <ol class="do">
     <li>Put the bracket base on the yaw horn.</li>
-    <li>Put 4 x <span class="m3">M3 x 8</span> from the top, inside the U, into the horn. Do not use washers. (You used this screw here on 28 October.)</li>
+    <li>Put 4 x <span class="m3">M3 x 8</span> from the top, inside the U, into the horn. Do not use washers.</li>
   </ol>
 </section>
 
 <section class="step" id="s13">
-  <div class="stephead"><span class="num">13</span><h2>Pitch servo into the bracket</h2></div>
+  <div class="stephead"><span class="num">14</span><h2>Pitch servo into the bracket</h2></div>
   <figure><img src="img/s13_pitch.jpg" alt="Pitch servo above the bracket with 8 screws through the arms"></figure>
   <ol class="do">
     <li>Plug the cable into the pitch servo first.</li>
@@ -274,12 +281,12 @@ html{scroll-behavior:smooth}
 </section>
 
 <section class="step" id="s14">
-  <div class="stephead"><span class="num">14</span><h2>OAK-D Lite and head</h2></div>
+  <div class="stephead"><span class="num">15</span><h2>OAK-D Lite and head</h2></div>
   <figure><img src="img/s14_head.jpg" alt="Head above the pitch servo, 8 screws into the horn and the idler disc"></figure>
   <ol class="do">
     <li>Put the OAK-D Lite on the ledges in the head, lens to the front.</li>
     <li>Put 2 x M4 x 10 + washer into the OAK rear holes. Use the key through the two 8 mm holes in the rear wall. The 10 mm side holes are not for these screws.</li>
-    <li>Connect the right-angle USB-C cable.</li>
+    <li>Connect the USB-C end of the USB 3 cable to the OAK-D Lite.</li>
     <li>Lower the head straight down over the pitch servo. The bracket screw heads slide through the grooves in the head ribs.</li>
     <li>Put 4 x <span class="m3">M3 x 8</span> through each rib (8 screws): 4 into the horn and 4 into the idler disc. Do not use washers. Put them in after the head is on, because the screw tips stop the head.</li>
     <li>Reach up from under the open bottom of the head. Use the short end of the L-key and turn in small strokes. A small piece of Blu Tack on the key holds the screw.</li>
@@ -287,7 +294,7 @@ html{scroll-behavior:smooth}
 </section>
 
 <section class="step" id="s15">
-  <div class="stephead"><span class="num">15</span><h2>Lid onto the body</h2></div>
+  <div class="stephead"><span class="num">16</span><h2>Lid onto the body</h2></div>
   <figure><img src="img/s15_lid.jpg" alt="Lid with yaw servo above the body"></figure>
   <ol class="do">
     <li>Connect the yaw and pitch servo cables and the OAK cable.</li>
@@ -297,18 +304,22 @@ html{scroll-behavior:smooth}
 </section>
 
 <section class="step" id="s16">
-  <div class="stephead"><span class="num">16</span><h2>Power and final checks</h2></div>
+  <div class="stephead"><span class="num">17</span><h2>Power and final checks</h2></div>
   <figure><img src="img/s16_full.jpg" alt="Finished robot"></figure>
-  <div class="warn"><b>Warning</b><span>Do not connect the two servo buses together. Bus 2 (wheels) gets battery voltage. Battery voltage can damage the 7.4 V STS3215 servos on bus 1.</span></div>
+  <div class="warn"><b>Warning</b><span>Do not connect battery voltage to bus servo adapter 1. Do not connect the two servo buses together. The hip and head servos are 7.4 V servos. Battery voltage damages them.</span></div>
   <ul class="plain">
     <li>Battery → 10 A fuse → XT60 splice.</li>
-    <li>Splice → 7.4 V UBEC → bus adapter 1 → 4 hip servos, yaw and pitch.</li>
-    <li>Splice → 5.2 V UBEC → Pi 5. Set <code>usb_max_current_enable=1</code> on the Pi.</li>
-    <li>Splice (after the fuse) → bus adapter 2 → 2 wheel servos.</li>
+    <li>Splice → UBEC 2 (7.4 V) → screw terminal of bus servo adapter 1 → 4 hip servos, yaw servo and pitch servo.</li>
+    <li>Splice → screw terminal of bus servo adapter 2 → 2 wheel servos (battery voltage).</li>
+    <li>Splice → UBEC 1 (5.2 V) → 5 V and GND pins of the Pi 5. Set <code>usb_max_current_enable=1</code> on the Pi.</li>
+    <li>USB: one cable from the Pi to each bus servo adapter. One USB 3 cable from a blue port of the Pi to the OAK-D Lite.</li>
+    <li>Set the switch on each bus servo adapter to USB.</li>
   </ul>
   <ol class="do">
     <li>Before power: move each leg and the head by hand. Nothing must rub or touch.</li>
-    <li>First power: use the 6 V 5 A bench supply, not the battery.</li>
+    <li>Before you connect the adapters: measure the UBEC outputs. UBEC 1 must give 5.2 V. UBEC 2 must give 7.4 V.</li>
+    <li>First power: use a 6 V bench supply, not the battery.</li>
+    <li>Before each test: make sure that the 4 knee screws are not loose.</li>
     <li>Software limits: leg height 65 to 140 mm, head up 30°, down 50° (40° at full yaw), yaw ±90°.</li>
   </ol>
 </section>
@@ -318,7 +329,7 @@ html{scroll-behavior:smooth}
 <section class="box">
   <h2>Not checked in the model</h2>
   <ul class="plain">
-    <li>Cable routes. The model has no paths for the servo cables or the power wires.</li>
+    <li>Cable routes. The model has space for the plugs on the upper deck, but it has no paths for the servo cables or the power wires.</li>
     <li>The real depth of the servo case holes. The servo model shows holes 2 to 3 mm deep. If a screw stops before it is tight, do not force it. Add a washer.</li>
   </ul>
 </section>

@@ -2,26 +2,25 @@
 
 This document is written in ASD-STE100 Simplified Technical English.
 
-The depth camera finds the nearest obstacle in front of the robot. A safety layer then makes the speed command smaller. The brain (drive_026) does not change. The brain still keeps the balance. The camera only changes the speed and turn commands that you give with the keys.
+The depth camera finds the nearest obstacle in front of the robot. A safety layer then makes the speed command smaller. The brain does not change. The brain still keeps the balance. The camera only changes the speed and turn commands that you give with the keys.
 
-## The plan (5 steps)
-1. **Camera on the Pi.** The Pi gets depth pictures from the OAK-D Lite, 15 each second, 640 x 400. Program: `depth_cam.py --check`.
-2. **Nearest obstacle.** The Pi finds the nearest object in a corridor 30 cm wide in front of the wheels. It ignores the floor and objects lower than 3 cm. Programs: `obstacle.py` (the calculation), `depth_cam.py --watch` (live).
-3. **Safety layer.** `run_brain.py --depth`: if the free distance ahead is less than 35 cm, the forward speed becomes smaller (0.10, then 0.05 m/s). At 15 cm, the forward speed becomes 0 (2026-11-02). Explore mode (RB) steers around obstacles while it drives (Vector Field Histogram method): it measures the free distance in 9 directions from -40 to +40 deg and turns toward the free direction that is nearest to straight ahead. It goes slower when the way ahead is less than 60 cm, and turns on the spot only when less than 30 cm is free or all directions are blocked. Reverse and turn stay available. If the camera stops sending for 0.3 s, the forward speed becomes 0. The head turns 20 deg nose down in the stand move. Written 2026-11-01, see "Step 5" below.
-4. **Turn to the open side.** When the robot stops for an obstacle, it turns to the side with more free distance (left or right sector, 15 to 45 deg), then it drives again. Not written yet.
-5. **Later (optional).** A brain that sees depth in the simulator. Do this only after steps 1 to 4 work.
+## How it operates
+1. **Camera.** The Pi gets depth pictures from the OAK-D Lite, 15 each second, 640 x 400 (`depth_cam.py`).
+2. **Nearest obstacle.** The Pi finds the nearest object in a corridor 30 cm wide in front of the wheels. It ignores the floor and objects lower than 3 cm (`obstacle.py`).
+3. **Safety layer** (`run_brain.py --depth`). If the free distance ahead is less than 35 cm, the forward speed becomes smaller (0.10 m/s, then 0.05 m/s). At 15 cm, the forward speed becomes 0. Reverse and turn stay available. If the camera stops sending for 0.3 s, the forward speed becomes 0. The head turns 20 deg nose down in the stand move.
+4. **Explore mode** (RB button on the gamepad). The robot steers around obstacles while it drives (Vector Field Histogram method). It measures the free distance in 9 directions from -40 to +40 deg. It turns toward the free direction that is nearest to straight ahead. It goes slower when the way ahead is less than 60 cm. It turns on the spot only when less than 30 cm is free or all directions are blocked.
 
-Do the steps in this sequence. Do not go to the next step if a step fails.
+Do the setup and the tests in this sequence: "Camera setup", "Nearest obstacle test", "Obstacle stop test". Do not go to the next test if a test fails.
 
 ## Why the head must look down
 The lens is about 32 cm above the floor at the 120 mm stand height. The camera sees 25 deg above and 25 deg below the lens axis. With the head level (pitch 0), the camera does not see the floor nearer than about 69 cm from the lens. Thus a 10 cm box 30 cm in front of the robot is not visible (self-test in `obstacle.py`). With the head 20 deg nose down, the camera sees the floor from about 31 cm in front of the lens (23 cm in front of the bump). Then it sees the same box.
 
-Head pitch 20 deg nose down moves the robot's centre of mass forward by less than 1 mm. Step 3 tests this with the robot standing before it drives.
+Head pitch 20 deg nose down moves the robot's centre of mass forward by less than 1 mm. The obstacle stop test examines this with the robot standing before it drives.
 
 The front bump is about 8 cm in front of the lens. All distances in the programs are from the front of the bump (the nose of the robot).
 
-## Step 1: camera on the Pi (one time setup, then a test)
-The robot can be off. Only the Pi and the camera need power. No servo moves in steps 1 and 2.
+## Camera setup (one time setup, then a test)
+The servos can be off. Only the Pi and the camera need power. No servo moves in this test and in the nearest obstacle test.
 
 1. Connect the OAK-D Lite USB-C cable to a **blue** (USB 3) port on the Pi 5.
 2. Let the Pi give more USB current. The OAK needs more than the 600 mA limit that the Pi 5 uses with a power supply that is not the official one. The 5.2 V UBEC (8 A) can supply this. Add this line to `/boot/firmware/config.txt`, then restart the Pi:
@@ -41,35 +40,35 @@ The robot can be off. Only the Pi and the camera need power. No servo moves in s
 5. Put the robot on the floor. Make sure that the floor in front of it is open for 1.5 m. Turn the head down by hand a little (the head servo is limp) or leave it level.
 6. Run: `python depth_cam.py --check`
 7. Make sure that the result shows: `USB SUPER`, about 15 frames a second, `STEP 1 PASS`.
-8. Send the output and the two files `logs/depth_<time>.png` and `logs/depth_<time>.npy` to Claude. The floor fit line gives the real lens height and tilt. Claude compares them with the model numbers.
+8. Keep the output and the two files `logs/depth_<time>.png` and `logs/depth_<time>.npy`. The floor fit line gives the real lens height and tilt. Compare them with the model numbers (lens height approximately 32 cm at the 120 mm stand height).
 
-If you see `No OAK found`: check the cable and do item 3 again. If you see `not USB 3`: use the other blue port or a different USB-C cable.
+If you see `No OAK found`: check the cable and do step 3 again. If you see `not USB 3`: use the other blue port or a different USB-C cable.
 
-## Step 2: nearest obstacle (live)
-1. Robot on the floor as in step 1.
+## Nearest obstacle test
+1. Put the robot on the floor as in the camera setup.
 2. Run: `python depth_cam.py --watch` (or `--watch --head-pitch 20` if the head looks 20 deg down).
 3. Put a box or your foot in front of the robot. Move it nearer and farther. The line shows `go`, `SLOW` (less than 35 cm) or `STOP` (less than 15 cm).
-4. Do these checks and tell Claude the results:
+4. Do these checks:
    - Open floor only: the line must show `go` all the time.
    - A box 10 cm high at 50 cm: about 50 cm.
    - A box at the left side: the `left` number becomes small, not `ahead`.
    - A cable on the floor: `go` (lower than 3 cm).
 
-## Step 5: the robot stops for an obstacle
+## Obstacle stop test
 Two programs run at the same time on the Pi: `run_brain.py` (balance, 50 times each second) and `depth_cam.py` (camera). They are two programs so that the camera work does not make the balance loop late. `run_brain.py --depth` starts `depth_cam.py --watch --robot` by itself, so you need only one terminal.
 
-1. Open an SSH terminal (`ssh mofe@roadrunner-mini.local`) and do `cd ~/roadRunnerMiniV1/robot && source .venv/bin/activate`.
+1. Open an SSH terminal (`ssh <user>@roadrunner-mini.local`) and do `cd ~/roadRunnerMiniV1/robot && source .venv/bin/activate`.
 2. Run `python run_brain.py --depth` (add `--pad` for the gamepad). It shows `depth: starting the camera ... OK` before any servo moves. If the camera does not start, it stops and shows the last lines of the camera log. Do the usual start. In the stand move, the head turns 20 deg nose down.
-3. Test A (stand only, 30 s): do not drive. The robot must stand as well as before. The camera output goes to `logs/depth_cam_<time>.log` (it must show `go` with nothing in front).
-
-To see the camera output live, use `--cam-separate`: run `python depth_cam.py --watch --robot` in a second terminal first, then `python run_brain.py --depth --cam-separate`.
+3. Test A (stand only, 30 s): do not drive. The robot must stand as well as it does without `--depth`. The camera output goes to `logs/depth_cam_<time>.log` (it must show `go` with nothing in front).
 4. Test B (drive to a wall): put the robot 1.5 m from a wall or a big box, nose to the wall. Press `w` one time (0.05 m/s). The robot must stop about 15 cm from the wall. The terminal shows `(camera: .. cm)` when the camera limits the speed.
 5. Press `s` to drive back. Press `q` to stop.
 
-If the robot does not stop: press `q` (or B on the pad) at once. Send the terminal output, the newest `logs/depth_cam_<time>.log` and the newest `logs/run_<time>.csv` to Claude (columns `ahead` and `limit` are at the end).
+To see the camera output live, use `--cam-separate`: run `python depth_cam.py --watch --robot` in a second terminal first, then `python run_brain.py --depth --cam-separate`.
+
+If the robot does not stop: press `q` (or B on the pad) immediately. Then examine the terminal output, the newest `logs/depth_cam_<time>.log` and the newest `logs/run_<time>.csv` (the columns `ahead` and `limit` are at the end).
 
 ## Files
 - `obstacle.py`: the calculation (no camera, no servos). `python obstacle.py` runs the self-test on the Mac or the Pi.
-- `depth_cam.py`: the camera program (steps 1, 2 and 5).
+- `depth_cam.py`: the camera program.
 - `run_brain.py --depth`: the safety layer (`DepthGuard` in `obstacle.py`). run_brain sends the body pitch, leg height and head pitch to depth_cam on port 5801. depth_cam sends the free distance to run_brain on port 5800.
-- The numbers that are not measured yet: lens position (from the sim model, CAD S67), the 30 cm wide corridor, the 3 cm floor limit. Step 1 measures the lens height and tilt.
+- These numbers are not measured: the lens position (from the simulation model), the 30 cm wide corridor, the 3 cm floor limit. The camera setup test measures the lens height and tilt.

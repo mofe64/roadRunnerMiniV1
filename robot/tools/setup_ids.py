@@ -1,7 +1,7 @@
 """Give each servo its own ID. New servos all have ID 1, so connect ONE servo at a time to the adapter.
 
   python3 tools/setup_ids.py            then follow the questions
-IDs: head_pitch 1, head_yaw 2, hip_f_L 4, hip_f_R 3, hip_r_L 6, hip_r_R 5 (legs bus, battery voltage)
+IDs: head_pitch 1, head_yaw 2, hip_f_L 4, hip_f_R 3, hip_r_L 6, hip_r_R 5 (legs bus, 7.4 V from UBEC 2)
      wheel_L 11, wheel_R 12 (wheels bus, battery voltage)
 L and R are the robot's own left and right (look from behind the robot, nose away from you).
 """
